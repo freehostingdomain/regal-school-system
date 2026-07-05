@@ -759,16 +759,139 @@ function StudentsPage() {
   )
 }
 
-function ClassesPage() {
-  const [classes, setClasses] = useState([])
-  const [loading, setLoading] = useState(true)
+function ClassFormModal({ show, onClose, onSave, cls }) {
+  const { user } = useAuth()
+  const [form, setForm] = useState({
+    name: '', slug: '', level: 'primary', monthly_fee: '', admission_fee: '',
+    exam_fee: '', max_students: '40', campus_id: ''
+  })
 
   useEffect(() => {
+    if (cls) {
+      setForm({
+        name: cls.name || '', slug: cls.slug || '', level: cls.level || 'primary',
+        monthly_fee: cls.monthly_fee || '', admission_fee: cls.admission_fee || '',
+        exam_fee: cls.exam_fee || '', max_students: cls.max_students || '40',
+        campus_id: cls.campus_id || ''
+      })
+    }
+  }, [cls])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    onSave({ ...form, monthly_fee: parseFloat(form.monthly_fee) || 0, admission_fee: parseFloat(form.admission_fee) || 0, exam_fee: parseFloat(form.exam_fee) || 0, max_students: parseInt(form.max_students) || 40 })
+  }
+
+  if (!show) return null
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto">
+      <div className="bg-white rounded-xl p-6 w-full max-w-lg my-4">
+        <h3 className="text-lg font-bold mb-4">{cls ? 'Edit Class' : 'Add New Class'}</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {user?.role === 'super_admin' && (
+            <div>
+              <label className="label">Campus</label>
+              <select className="input-field" value={form.campus_id} onChange={e => setForm({...form, campus_id: e.target.value})}>
+                <option value="">Select Campus</option>
+                <option value="1">Khanpur Road</option>
+                <option value="2">UET Campus</option>
+              </select>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Class Name *</label>
+              <input className="input-field" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required placeholder="e.g. Class 1" />
+            </div>
+            <div>
+              <label className="label">Slug</label>
+              <input className="input-field" value={form.slug} onChange={e => setForm({...form, slug: e.target.value})} placeholder="e.g. class-1" />
+            </div>
+            <div>
+              <label className="label">Level</label>
+              <select className="input-field" value={form.level} onChange={e => setForm({...form, level: e.target.value})}>
+                <option value="montessori">Montessori</option>
+                <option value="primary">Primary</option>
+                <option value="middle">Middle</option>
+                <option value="high">High</option>
+                <option value="college">College</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Max Students</label>
+              <input type="number" className="input-field" value={form.max_students} onChange={e => setForm({...form, max_students: e.target.value})} min="1" />
+            </div>
+          </div>
+          <div className="border-t pt-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Fee Settings</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="label">Monthly Fee (PKR)</label>
+                <input type="number" className="input-field" value={form.monthly_fee} onChange={e => setForm({...form, monthly_fee: e.target.value})} min="0" />
+              </div>
+              <div>
+                <label className="label">Admission Fee (PKR)</label>
+                <input type="number" className="input-field" value={form.admission_fee} onChange={e => setForm({...form, admission_fee: e.target.value})} min="0" />
+              </div>
+              <div>
+                <label className="label">Exam Fee (PKR)</label>
+                <input type="number" className="input-field" value={form.exam_fee} onChange={e => setForm({...form, exam_fee: e.target.value})} min="0" />
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 pt-4 border-t">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" className="btn-primary flex-1">{cls ? 'Update Class' : 'Add Class'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function ClassesPage() {
+  const { user } = useAuth()
+  const [classes, setClasses] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editClass, setEditClass] = useState(null)
+  const [message, setMessage] = useState('')
+  const [filterCampus, setFilterCampus] = useState('')
+
+  const loadClasses = () => {
     api().get('/classes').then(res => {
       setClasses(res.data.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadClasses() }, [])
+
+  const handleSave = (form) => {
+    const method = editClass ? 'put' : 'post'
+    const url = editClass ? `/classes/${editClass.id}` : '/classes'
+    api()[method](url, form).then(() => {
+      setMessage(editClass ? 'Class updated successfully!' : 'Class added successfully!')
+      setShowForm(false)
+      setEditClass(null)
+      loadClasses()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error saving class'))
+  }
+
+  const handleDelete = (cls) => {
+    if (!confirm(`Delete "${cls.name}"? ${cls.student_count} student(s) enrolled.`)) return
+    api().delete(`/classes/${cls.id}`).then(() => {
+      setMessage('Class deleted!')
+      loadClasses()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error deleting class'))
+  }
+
+  const canEdit = ['super_admin', 'campus_admin', 'teacher', 'accountant'].includes(user?.role)
+
+  const filteredClasses = filterCampus ? classes.filter(c => String(c.campus_id) === filterCampus) : classes
 
   const levelColors = {
     montessori: 'bg-pink-100 text-pink-700',
@@ -782,23 +905,55 @@ function ClassesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Classes</h1>
-        <span className="text-sm text-gray-500">{classes.length} classes</span>
+        <div className="flex items-center gap-3">
+          {user?.role === 'super_admin' && (
+            <select className="input-field w-auto text-sm py-1.5" value={filterCampus} onChange={e => setFilterCampus(e.target.value)}>
+              <option value="">All Campuses</option>
+              <option value="1">Khanpur Road</option>
+              <option value="2">UET Campus</option>
+            </select>
+          )}
+          <span className="text-sm text-gray-500">{filteredClasses.length} classes</span>
+          {canEdit && (
+            <button onClick={() => { setEditClass(null); setShowForm(true) }} className="btn-primary">
+              <Plus className="w-4 h-4 mr-1 inline" /> Add Class
+            </button>
+          )}
+        </div>
       </div>
+
+      {message && (
+        <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('deleted') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {message}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div></div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {classes.map(cls => (
+          {filteredClasses.map(cls => (
             <div key={cls.id} className="card hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-bold text-lg">{cls.name}</h3>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-lg truncate">{cls.name}</h3>
                   <p className="text-sm text-gray-500">{cls.campus_name}</p>
                 </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${levelColors[cls.level] || 'bg-gray-100 text-gray-700'}`}>
-                  {cls.level}
-                </span>
+                <div className="flex items-center gap-1 ml-2">
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${levelColors[cls.level] || 'bg-gray-100 text-gray-700'}`}>
+                    {cls.level}
+                  </span>
+                  {canEdit && (
+                    <>
+                      <button onClick={() => { setEditClass(cls); setShowForm(true) }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={() => handleDelete(cls)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center mt-4">
                 <div className="bg-blue-50 rounded-lg p-2">
@@ -818,6 +973,8 @@ function ClassesPage() {
           ))}
         </div>
       )}
+
+      <ClassFormModal show={showForm} onClose={() => { setShowForm(false); setEditClass(null) }} onSave={handleSave} cls={editClass} />
     </div>
   )
 }
