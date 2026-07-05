@@ -481,11 +481,14 @@ function StudentFormModal({ show, onClose, onSave, student, classes }) {
   if (!show) return null
 
   const filteredClasses = classes?.filter(c => {
-    if (user?.role !== 'super_admin' && user?.campus_id) {
-      return c.campus_id === user.campus_id
+    if (user?.role === 'super_admin') {
+      if (form.campus_id && form.campus_id !== '') {
+        return c.campus_id === parseInt(form.campus_id)
+      }
+      return true
     }
-    if (form.campus_id) {
-      return c.campus_id === parseInt(form.campus_id)
+    if (user?.campus_id) {
+      return c.campus_id === user.campus_id
     }
     return true
   }) || []
