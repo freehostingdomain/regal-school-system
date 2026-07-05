@@ -121,4 +121,29 @@ router.put('/:id/salaries/:salaryId/pay', authenticate, authorize('super_admin',
   }
 });
 
+router.put('/:id/salaries/:salaryId', authenticate, authorize('super_admin', 'campus_admin'), activityLogger('Salary'), (req, res) => {
+  try {
+    const db = getDb();
+    const { month, year, base_salary, bonus, deductions, notes } = req.body;
+    const net = (base_salary || 0) + (bonus || 0) - (deductions || 0);
+    db.prepare('UPDATE teacher_salaries SET month = COALESCE(?, month), year = COALESCE(?, year), base_salary = COALESCE(?, base_salary), bonus = COALESCE(?, bonus), deductions = COALESCE(?, deductions), net_salary = ?, notes = COALESCE(?, notes) WHERE id = ? AND teacher_id = ?').run(
+      month, year, base_salary, bonus, deductions, net, notes, req.params.salaryId, req.params.id
+    );
+    const salary = db.prepare('SELECT * FROM teacher_salaries WHERE id = ?').get(req.params.salaryId);
+    res.json({ success: true, message: 'Salary updated.', data: salary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.delete('/:id/salaries/:salaryId', authenticate, authorize('super_admin', 'campus_admin'), activityLogger('Salary'), (req, res) => {
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM teacher_salaries WHERE id = ? AND teacher_id = ?').run(req.params.salaryId, req.params.id);
+    res.json({ success: true, message: 'Salary record deleted.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

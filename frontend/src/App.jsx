@@ -1597,6 +1597,7 @@ function TeachersPage() {
   const [salaryRecords, setSalaryRecords] = useState([])
   const [salaryForm, setSalaryForm] = useState({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' })
   const [showSalaryForm, setShowSalaryForm] = useState(false)
+  const [editSalary, setEditSalary] = useState(null)
 
   const loadTeachers = () => {
     api().get('/teachers').then(res => {
@@ -1662,6 +1663,41 @@ function TeachersPage() {
       loadTeachers()
       setTimeout(() => setMessage(''), 3000)
     }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const updateSalary = (e) => {
+    e.preventDefault()
+    const data = {
+      ...salaryForm,
+      base_salary: parseFloat(salaryForm.base_salary) || 0,
+      bonus: parseFloat(salaryForm.bonus) || 0,
+      deductions: parseFloat(salaryForm.deductions) || 0
+    }
+    api().put(`/teachers/${salaryModal.id}/salaries/${editSalary.id}`, data).then(() => {
+      setMessage('Salary updated!')
+      setEditSalary(null)
+      setShowSalaryForm(false)
+      setSalaryForm({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' })
+      api().get(`/teachers/${salaryModal.id}/salaries`).then(res => setSalaryRecords(res.data.data))
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const deleteSalary = (salaryId) => {
+    if (!confirm('Delete this salary record?')) return
+    api().delete(`/teachers/${salaryModal.id}/salaries/${salaryId}`).then(() => {
+      setMessage('Salary record deleted!')
+      api().get(`/teachers/${salaryModal.id}/salaries`).then(res => setSalaryRecords(res.data.data))
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const startEditSalary = (s) => {
+    setEditSalary(s)
+    setShowSalaryForm(false)
+    setSalaryForm({ month: String(s.month), year: String(s.year), base_salary: String(s.base_salary), bonus: String(s.bonus), deductions: String(s.deductions), notes: s.notes || '' })
   }
 
   const totalPaid = salaryRecords.filter(s => s.status === 'paid').reduce((sum, s) => sum + s.net_salary, 0)
@@ -1802,13 +1838,14 @@ function TeachersPage() {
             </div>
 
             {['super_admin', 'campus_admin'].includes(user?.role) && (
-              <button onClick={() => setShowSalaryForm(!showSalaryForm)} className="btn-primary w-full mb-4 text-sm">
-                <Plus className="w-4 h-4 mr-1 inline" /> Add Salary Record
+              <button onClick={() => { setShowSalaryForm(!showSalaryForm); setEditSalary(null); setSalaryForm({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' }) }} className="btn-primary w-full mb-4 text-sm">
+                <Plus className="w-4 h-4 mr-1 inline" /> {editSalary ? 'Edit Salary' : 'Add Salary Record'}
               </button>
             )}
 
-            {showSalaryForm && (
-              <form onSubmit={addSalary} className="bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
+            {(showSalaryForm || editSalary) && (
+              <form onSubmit={editSalary ? updateSalary : addSalary} className="bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
+                <p className="text-sm font-medium text-gray-700">{editSalary ? 'Edit Salary Record' : 'New Salary Record'}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label">Month *</label>
@@ -1839,8 +1876,8 @@ function TeachersPage() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setShowSalaryForm(false)} className="btn-secondary flex-1">Cancel</button>
-                  <button type="submit" className="btn-primary flex-1">Save</button>
+                  <button type="button" onClick={() => { setShowSalaryForm(false); setEditSalary(null); setSalaryForm({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' }) }} className="btn-secondary flex-1">Cancel</button>
+                  <button type="submit" className="btn-primary flex-1">{editSalary ? 'Update' : 'Save'}</button>
                 </div>
               </form>
             )}
@@ -1858,14 +1895,24 @@ function TeachersPage() {
                       {s.deductions > 0 && ` - Deductions: ${formatCurrency(s.deductions)}`}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold">{formatCurrency(s.net_salary)}</p>
-                    {s.status === 'paid' ? (
-                      <span className="text-xs text-green-600">Paid {formatDate(s.paid_date)}</span>
-                    ) : (
-                      ['super_admin', 'campus_admin'].includes(user?.role) && (
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <p className="text-sm font-bold">{formatCurrency(s.net_salary)}</p>
+                      {s.status === 'paid' ? (
+                        <span className="text-xs text-green-600">Paid {formatDate(s.paid_date)}</span>
+                      ) : (
                         <button onClick={() => markPaid(s.id)} className="text-xs font-medium text-white bg-green-600 hover:bg-green-700 px-2 py-0.5 rounded mt-1">Mark Paid</button>
-                      )
+                      )}
+                    </div>
+                    {['super_admin', 'campus_admin'].includes(user?.role) && (
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => startEditSalary(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                        <button onClick={() => deleteSalary(s.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
