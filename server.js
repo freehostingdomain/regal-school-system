@@ -17,7 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
-  origin: ['https://startling-biscochitos-104a2f.netlify.app', 'http://localhost:5173', 'http://localhost:3000'],
+  origin: '*',
   credentials: true
 }));
 app.use(express.json());
