@@ -17,8 +17,9 @@ function useAuth() {
 
 function api() {
   const token = localStorage.getItem('token')
+  const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
   return axios.create({
-    baseURL: '/api',
+    baseURL: baseURL,
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   })
 }
@@ -47,7 +48,8 @@ function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await axios.post('/api/auth/login', { email, password })
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+      const res = await axios.post(`${apiBase}/auth/login`, { email, password })
       login(res.data.data)
       navigate('/dashboard')
     } catch (err) {
