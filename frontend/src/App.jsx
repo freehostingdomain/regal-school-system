@@ -10,9 +10,14 @@ import {
 } from 'lucide-react'
 
 const AuthContext = createContext(null)
+const CampusContext = createContext(null)
 
 function useAuth() {
   return useContext(AuthContext)
+}
+
+function useCampus() {
+  return useContext(CampusContext)
 }
 
 function api() {
@@ -198,6 +203,7 @@ function Sidebar({ collapsed, setCollapsed }) {
 
 function Header() {
   const { user, logout } = useAuth()
+  const { selectedCampus, setSelectedCampus } = useCampus()
   const navigate = useNavigate()
   const [unreadCount, setUnreadCount] = useState(0)
 
@@ -219,7 +225,18 @@ function Header() {
         <h2 className="text-lg font-semibold text-gray-800">Welcome, {user?.name}</h2>
         <p className="text-sm text-gray-500">{user?.campus_name || 'All Campuses'}</p>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        {user?.role === 'super_admin' && (
+          <select
+            className="input-field w-auto text-sm py-1.5 pr-8 border-blue-300 focus:border-blue-500 bg-blue-50"
+            value={selectedCampus || ''}
+            onChange={e => setSelectedCampus(e.target.value ? parseInt(e.target.value) : null)}
+          >
+            <option value="">All Campuses</option>
+            <option value="1">Khanpur Road</option>
+            <option value="2">UET Campus</option>
+          </select>
+        )}
         <button onClick={() => navigate('/notifications')} className="relative p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
           <Bell className="w-5 h-5" />
           {unreadCount > 0 && (
@@ -247,13 +264,16 @@ function Header() {
 function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const { selectedCampus } = useCampus()
 
   useEffect(() => {
-    api().get('/dashboard').then(res => {
+    setLoading(true)
+    const params = selectedCampus ? { campus_id: selectedCampus } : {}
+    api().get('/dashboard', { params }).then(res => {
       setData(res.data.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }, [selectedCampus])
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div></div>
   if (!data) return <div className="text-center py-10 text-gray-500">Failed to load dashboard</div>
@@ -604,16 +624,19 @@ function StudentsPage() {
   const [editStudent, setEditStudent] = useState(null)
   const [classes, setClasses] = useState([])
   const [message, setMessage] = useState('')
+  const { selectedCampus } = useCampus()
 
   const loadStudents = (page = 1) => {
-    api().get('/students', { params: { search, page, limit: 15 } }).then(res => {
+    const params = { search, page, limit: 15 }
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/students', { params }).then(res => {
       setStudents(res.data.data)
       setMeta(res.data.meta)
       setLoading(false)
     }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { loadStudents(); api().get('/classes').then(r => setClasses(r.data.data)) }, [])
+  useEffect(() => { loadStudents(); api().get('/classes').then(r => setClasses(r.data.data)) }, [selectedCampus])
 
   const handleSearch = (e) => { e.preventDefault(); loadStudents(1) }
 
@@ -850,14 +873,125 @@ function ClassFormModal({ show, onClose, onSave, cls }) {
   )
 }
 
+function SectionManagementModal({ show, onClose, cls }) {
+  const [sections, setSections] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [newName, setNewName] = useState('')
+  const [editId, setEditId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [message, setMessage] = useState('')
+
+  const loadSections = () => {
+    if (!cls) return
+    api().get(`/classes/${cls.id}/sections`).then(res => {
+      setSections(res.data.data)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    if (show) { loadSections(); setNewName(''); setEditId(null); setEditName('') }
+  }, [show, cls])
+
+  const addSection = () => {
+    if (!newName.trim()) return
+    api().post(`/classes/${cls.id}/sections`, { name: newName.trim() }).then(() => {
+      setNewName('')
+      setMessage('Section added!')
+      loadSections()
+      setTimeout(() => setMessage(''), 2000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const updateSection = (sectionId) => {
+    if (!editName.trim()) return
+    api().put(`/classes/${cls.id}/sections/${sectionId}`, { name: editName.trim() }).then(() => {
+      setEditId(null)
+      setEditName('')
+      setMessage('Section updated!')
+      loadSections()
+      setTimeout(() => setMessage(''), 2000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const deleteSection = (sectionId, sectionName) => {
+    if (!confirm(`Delete section "${sectionName}"?`)) return
+    api().delete(`/classes/${cls.id}/sections/${sectionId}`).then(() => {
+      setMessage('Section deleted!')
+      loadSections()
+      setTimeout(() => setMessage(''), 2000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  if (!show) return null
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Sections - {cls?.name}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        {message && <div className="bg-green-50 text-green-700 px-3 py-2 rounded-lg text-sm mb-3">{message}</div>}
+
+        <div className="flex gap-2 mb-4">
+          <input className="input-field flex-1" placeholder="New section name (e.g. A, B, C)" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSection()} />
+          <button onClick={addSection} className="btn-primary px-4"><Plus className="w-4 h-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-6 text-gray-500">Loading...</div>
+        ) : sections.length === 0 ? (
+          <div className="text-center py-6 text-gray-400 text-sm">No sections yet. Add one above.</div>
+        ) : (
+          <div className="space-y-2">
+            {sections.map(sec => (
+              <div key={sec.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
+                {editId === sec.id ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input className="input-field flex-1 py-1.5" value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => e.key === 'Enter' && updateSection(sec.id)} autoFocus />
+                    <button onClick={() => updateSection(sec.id)} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg" title="Save"><Check className="w-4 h-4" /></button>
+                    <button onClick={() => { setEditId(null); setEditName('') }} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Cancel"><X className="w-4 h-4" /></button>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <span className="font-medium">{sec.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">{sec.student_count || 0} students</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => { setEditId(sec.id); setEditName(sec.name) }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={() => deleteSection(sec.id, sec.name)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end mt-4 pt-3 border-t">
+          <button onClick={onClose} className="btn-secondary px-6">Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ClassesPage() {
   const { user } = useAuth()
+  const { selectedCampus } = useCampus()
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editClass, setEditClass] = useState(null)
   const [message, setMessage] = useState('')
-  const [filterCampus, setFilterCampus] = useState('')
+  const [showSections, setShowSections] = useState(null)
 
   const loadClasses = () => {
     api().get('/classes').then(res => {
@@ -891,7 +1025,7 @@ function ClassesPage() {
 
   const canEdit = ['super_admin', 'campus_admin', 'teacher', 'accountant'].includes(user?.role)
 
-  const filteredClasses = filterCampus ? classes.filter(c => String(c.campus_id) === filterCampus) : classes
+  const filteredClasses = selectedCampus ? classes.filter(c => c.campus_id === selectedCampus) : classes
 
   const levelColors = {
     montessori: 'bg-pink-100 text-pink-700',
@@ -906,13 +1040,6 @@ function ClassesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Classes</h1>
         <div className="flex items-center gap-3">
-          {user?.role === 'super_admin' && (
-            <select className="input-field w-auto text-sm py-1.5" value={filterCampus} onChange={e => setFilterCampus(e.target.value)}>
-              <option value="">All Campuses</option>
-              <option value="1">Khanpur Road</option>
-              <option value="2">UET Campus</option>
-            </select>
-          )}
           <span className="text-sm text-gray-500">{filteredClasses.length} classes</span>
           {canEdit && (
             <button onClick={() => { setEditClass(null); setShowForm(true) }} className="btn-primary">
@@ -969,12 +1096,18 @@ function ClassesPage() {
                   <p className="text-xs text-gray-500">Capacity</p>
                 </div>
               </div>
+              {canEdit && (
+                <button onClick={() => setShowSections(cls)} className="w-full mt-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg border border-blue-200 transition-colors">
+                  Manage Sections
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
       <ClassFormModal show={showForm} onClose={() => { setShowForm(false); setEditClass(null) }} onSave={handleSave} cls={editClass} />
+      <SectionManagementModal show={!!showSections} onClose={() => setShowSections(null)} cls={showSections} />
     </div>
   )
 }
@@ -986,10 +1119,13 @@ function AttendancePage() {
   const [summary, setSummary] = useState({})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const { selectedCampus } = useCampus()
 
   const loadAttendance = () => {
     setLoading(true)
-    api().get('/attendance/today').then(res => {
+    const params = { date }
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/attendance/today', { params }).then(res => {
       setRecords(res.data.data.map(r => ({
         ...r,
         status: r.status || 'absent',
@@ -998,7 +1134,7 @@ function AttendancePage() {
     }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { loadAttendance() }, [])
+  useEffect(() => { loadAttendance() }, [selectedCampus])
 
   const updateStatus = (index, status) => {
     const updated = [...records]
@@ -1138,16 +1274,22 @@ function FinancePage() {
   const [showPaymentModal, setShowPaymentModal] = useState(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const { selectedCampus } = useCampus()
+
+  const loadVouchers = () => {
+    setLoading(true)
+    const params = {}
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/fees/vouchers', { params }).then(res => {
+      setVouchers(res.data.data)
+      setSummary(res.data.summary)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
 
   useEffect(() => {
-    if (activeTab === 'vouchers') {
-      api().get('/fees/vouchers').then(res => {
-        setVouchers(res.data.data)
-        setSummary(res.data.summary)
-        setLoading(false)
-      }).catch(() => setLoading(false))
-    }
-  }, [activeTab])
+    if (activeTab === 'vouchers') loadVouchers()
+  }, [activeTab, selectedCampus])
 
   const recordPayment = () => {
     if (!showPaymentModal || !paymentAmount) return
@@ -1158,10 +1300,7 @@ function FinancePage() {
     }).then(res => {
       setShowPaymentModal(null)
       setPaymentAmount('')
-      api().get('/fees/vouchers').then(r => {
-        setVouchers(r.data.data)
-        setSummary(r.data.summary)
-      })
+      loadVouchers()
     }).catch(err => alert(err.response?.data?.message || 'Payment failed'))
   }
 
@@ -1584,6 +1723,7 @@ function ProtectedRoute({ children }) {
 function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [selectedCampus, setSelectedCampus] = useState(null)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -1618,17 +1758,19 @@ function App() {
 
   return (
     <AuthContext.Provider value={{ user, login, logout }}>
-      <Routes>
-        <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
-        <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
-        <Route path="/classes" element={<ProtectedRoute><ClassesPage /></ProtectedRoute>} />
-        <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
-        <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
-        <Route path="/announcements" element={<ProtectedRoute><AnnouncementsPage /></ProtectedRoute>} />
-        <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/dashboard" />} />
-      </Routes>
+      <CampusContext.Provider value={{ selectedCampus, setSelectedCampus }}>
+        <Routes>
+          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
+          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+          <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
+          <Route path="/classes" element={<ProtectedRoute><ClassesPage /></ProtectedRoute>} />
+          <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
+          <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
+          <Route path="/announcements" element={<ProtectedRoute><AnnouncementsPage /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/dashboard" />} />
+        </Routes>
+      </CampusContext.Provider>
     </AuthContext.Provider>
   )
 }

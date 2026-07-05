@@ -138,4 +138,17 @@ router.delete('/:classId/sections/:sectionId', authenticate, authorize('super_ad
   }
 });
 
+router.put('/:classId/sections/:sectionId', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Section'), (req, res) => {
+  try {
+    const db = getDb();
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ success: false, message: 'Section name is required.' });
+    db.prepare('UPDATE sections SET name = ? WHERE id = ? AND is_active = 1').run(name, req.params.sectionId);
+    const section = db.prepare('SELECT * FROM sections WHERE id = ?').get(req.params.sectionId);
+    res.json({ success: true, message: 'Section updated.', data: section });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
