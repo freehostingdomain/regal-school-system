@@ -312,6 +312,22 @@ function initDatabase() {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS teacher_salaries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      teacher_id INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      base_salary REAL DEFAULT 0,
+      bonus REAL DEFAULT 0,
+      deductions REAL DEFAULT 0,
+      net_salary REAL DEFAULT 0,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','paid')),
+      paid_date TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (teacher_id) REFERENCES users(id)
+    );
   `);
 
   seedData(db);
@@ -430,6 +446,14 @@ function seedData(db) {
   db.prepare(`INSERT INTO announcements (campus_id, title, content, type, created_by) VALUES (?, ?, ?, ?, ?)`).run(
     2, 'Annual Exam Schedule', 'Annual examination for Classes 9-10 will begin from 15th August 2026. Detailed schedule will be shared soon.', 'general', 3
   );
+
+  const insertSalary = db.prepare(`INSERT INTO teacher_salaries (teacher_id, month, year, base_salary, bonus, deductions, net_salary, status, paid_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  insertSalary.run(4, 6, 2026, 45000, 5000, 2000, 48000, 'paid', '2026-07-01');
+  insertSalary.run(4, 7, 2026, 45000, 0, 0, 45000, 'pending', null);
+  insertSalary.run(5, 6, 2026, 42000, 3000, 1500, 43500, 'paid', '2026-07-01');
+  insertSalary.run(5, 7, 2026, 42000, 0, 0, 42000, 'pending', null);
+  insertSalary.run(6, 6, 2026, 48000, 4000, 2000, 50000, 'paid', '2026-07-01');
+  insertSalary.run(6, 7, 2026, 48000, 0, 0, 48000, 'pending', null);
 
   console.log('Seed data inserted successfully');
 }

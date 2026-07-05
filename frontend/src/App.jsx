@@ -6,7 +6,7 @@ import {
   Bell, LogOut, Menu, X, ChevronDown, School, Bus, BookOpen,
   Calendar, Settings, BarChart3, FileText, Search, CheckCircle2,
   XCircle, Clock, AlertTriangle, TrendingUp, Eye, Plus, Activity,
-  Check
+  Check, UserPlus, Briefcase
 } from 'lucide-react'
 
 const AuthContext = createContext(null)
@@ -145,6 +145,7 @@ function Sidebar({ collapsed, setCollapsed }) {
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: Users, label: 'Students', path: '/students' },
     { icon: GraduationCap, label: 'Classes', path: '/classes' },
+    { icon: Briefcase, label: 'Teachers', path: '/teachers' },
     { icon: ClipboardCheck, label: 'Attendance', path: '/attendance' },
     { icon: DollarSign, label: 'Finance', path: '/finance' },
     { icon: Bell, label: 'Announcements', path: '/announcements' },
@@ -876,7 +877,7 @@ function ClassFormModal({ show, onClose, onSave, cls }) {
 function SectionManagementModal({ show, onClose, cls }) {
   const [sections, setSections] = useState([])
   const [teachers, setTeachers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newTeacherId, setNewTeacherId] = useState('')
   const [editId, setEditId] = useState(null)
@@ -885,21 +886,21 @@ function SectionManagementModal({ show, onClose, cls }) {
   const [message, setMessage] = useState('')
 
   const loadSections = () => {
-    if (!cls) return
+    if (!cls?.id) return
+    setLoading(true)
     api().get(`/classes/${cls.id}/sections`).then(res => {
-      setSections(res.data.data)
-      setLoading(false)
-    }).catch(() => setLoading(false))
+      setSections(res.data.data || [])
+    }).catch(() => setSections([])).finally(() => setLoading(false))
   }
 
   const loadTeachers = () => {
     api().get('/teachers').then(res => {
-      setTeachers(res.data.data)
-    }).catch(() => {})
+      setTeachers(res.data.data || [])
+    }).catch(() => setTeachers([]))
   }
 
   useEffect(() => {
-    if (show) {
+    if (show && cls) {
       loadSections()
       loadTeachers()
       setNewName('')
@@ -1583,6 +1584,304 @@ function AnnouncementsPage() {
   )
 }
 
+const monthNamesShort = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function TeachersPage() {
+  const { user } = useAuth()
+  const [teachers, setTeachers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [message, setMessage] = useState('')
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' })
+  const [salaryModal, setSalaryModal] = useState(null)
+  const [salaryRecords, setSalaryRecords] = useState([])
+  const [salaryForm, setSalaryForm] = useState({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' })
+  const [showSalaryForm, setShowSalaryForm] = useState(false)
+
+  const loadTeachers = () => {
+    api().get('/teachers').then(res => {
+      setTeachers(res.data.data)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
+  useEffect(() => { loadTeachers() }, [])
+
+  const handleAdd = (e) => {
+    e.preventDefault()
+    const data = { ...form, base_salary: parseFloat(form.base_salary) || 0 }
+    if (!data.campus_id) data.campus_id = user?.campus_id || 1
+    api().post('/teachers', data).then(() => {
+      setMessage('Teacher added!')
+      setShowForm(false)
+      setForm({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' })
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const handleDelete = (teacher) => {
+    if (!confirm(`Remove "${teacher.name}"?`)) return
+    api().delete(`/teachers/${teacher.id}`).then(() => {
+      setMessage('Teacher removed!')
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const openSalaryModal = (teacher) => {
+    setSalaryModal(teacher)
+    setShowSalaryForm(false)
+    api().get(`/teachers/${teacher.id}/salaries`).then(res => {
+      setSalaryRecords(res.data.data)
+    }).catch(() => setSalaryRecords([]))
+  }
+
+  const addSalary = (e) => {
+    e.preventDefault()
+    const data = {
+      ...salaryForm,
+      base_salary: parseFloat(salaryForm.base_salary) || 0,
+      bonus: parseFloat(salaryForm.bonus) || 0,
+      deductions: parseFloat(salaryForm.deductions) || 0
+    }
+    api().post(`/teachers/${salaryModal.id}/salaries`, data).then(() => {
+      setMessage('Salary record added!')
+      setShowSalaryForm(false)
+      setSalaryForm({ month: '', year: '2026', base_salary: '', bonus: '', deductions: '', notes: '' })
+      api().get(`/teachers/${salaryModal.id}/salaries`).then(res => setSalaryRecords(res.data.data))
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const markPaid = (salaryId) => {
+    api().put(`/teachers/${salaryModal.id}/salaries/${salaryId}/pay`).then(() => {
+      setMessage('Salary marked as paid!')
+      api().get(`/teachers/${salaryModal.id}/salaries`).then(res => setSalaryRecords(res.data.data))
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const totalPaid = salaryRecords.filter(s => s.status === 'paid').reduce((sum, s) => sum + s.net_salary, 0)
+  const totalPending = salaryRecords.filter(s => s.status === 'pending').reduce((sum, s) => sum + s.net_salary, 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Teachers Management</h1>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">{teachers.length} teachers</span>
+          {['super_admin', 'campus_admin'].includes(user?.role) && (
+            <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+              <UserPlus className="w-4 h-4 mr-1 inline" /> Add Teacher
+            </button>
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('removed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message}</div>
+      )}
+
+      {showForm && (
+        <div className="card">
+          <h3 className="font-bold mb-3">Add New Teacher</h3>
+          <form onSubmit={handleAdd} className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Full Name *</label>
+                <input className="input-field" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
+              </div>
+              <div>
+                <label className="label">Email *</label>
+                <input type="email" className="input-field" value={form.email} onChange={e => setForm({...form, email: e.target.value})} required />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <input className="input-field" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">Password *</label>
+                <input type="password" className="input-field" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+              </div>
+              {user?.role === 'super_admin' && (
+                <div>
+                  <label className="label">Campus</label>
+                  <select className="input-field" value={form.campus_id} onChange={e => setForm({...form, campus_id: e.target.value})}>
+                    <option value="">Select Campus</option>
+                    <option value="1">Khanpur Road</option>
+                    <option value="2">UET Campus</option>
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">Monthly Salary (PKR)</label>
+                <input type="number" className="input-field" value={form.base_salary} onChange={e => setForm({...form, base_salary: e.target.value})} min="0" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
+              <button type="submit" className="btn-primary">Add Teacher</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="card overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="table-header">
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Phone</th>
+                <th className="px-4 py-3">Campus</th>
+                <th className="px-4 py-3 text-center">Sections</th>
+                <th className="px-4 py-3 text-right">Last Salary</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={7} className="text-center py-10 text-gray-500">Loading...</td></tr>
+              ) : teachers.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-10 text-gray-500">No teachers found</td></tr>
+              ) : teachers.map(t => (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs font-bold">{t.name?.charAt(0)}</div>
+                      <span className="text-sm font-medium">{t.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{t.email}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{t.phone || '-'}</td>
+                  <td className="px-4 py-3 text-xs"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full">{t.campus_name?.split(' - ')[1]}</span></td>
+                  <td className="px-4 py-3 text-sm text-center">{t.sections_assigned}</td>
+                  <td className="px-4 py-3 text-sm text-right font-medium">{t.last_salary ? formatCurrency(t.last_salary) : '-'}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => openSalaryModal(t)} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg" title="Salary">Salary</button>
+                      {['super_admin', 'campus_admin'].includes(user?.role) && (
+                        <button onClick={() => handleDelete(t)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Remove">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {salaryModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Salary - {salaryModal.name}</h3>
+              <button onClick={() => setSalaryModal(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-green-50 rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-green-600">{formatCurrency(totalPaid)}</p>
+                <p className="text-xs text-green-600">Total Paid</p>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-amber-600">{formatCurrency(totalPending)}</p>
+                <p className="text-xs text-amber-600">Pending</p>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-blue-600">{salaryRecords.length}</p>
+                <p className="text-xs text-blue-600">Records</p>
+              </div>
+            </div>
+
+            {['super_admin', 'campus_admin'].includes(user?.role) && (
+              <button onClick={() => setShowSalaryForm(!showSalaryForm)} className="btn-primary w-full mb-4 text-sm">
+                <Plus className="w-4 h-4 mr-1 inline" /> Add Salary Record
+              </button>
+            )}
+
+            {showSalaryForm && (
+              <form onSubmit={addSalary} className="bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Month *</label>
+                    <select className="input-field" value={salaryForm.month} onChange={e => setSalaryForm({...salaryForm, month: e.target.value})} required>
+                      <option value="">Select</option>
+                      {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{monthNames[m]}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Year *</label>
+                    <input type="number" className="input-field" value={salaryForm.year} onChange={e => setSalaryForm({...salaryForm, year: e.target.value})} required />
+                  </div>
+                  <div>
+                    <label className="label">Base Salary *</label>
+                    <input type="number" className="input-field" value={salaryForm.base_salary} onChange={e => setSalaryForm({...salaryForm, base_salary: e.target.value})} min="0" required />
+                  </div>
+                  <div>
+                    <label className="label">Bonus</label>
+                    <input type="number" className="input-field" value={salaryForm.bonus} onChange={e => setSalaryForm({...salaryForm, bonus: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Deductions</label>
+                    <input type="number" className="input-field" value={salaryForm.deductions} onChange={e => setSalaryForm({...salaryForm, deductions: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Notes</label>
+                    <input className="input-field" value={salaryForm.notes} onChange={e => setSalaryForm({...salaryForm, notes: e.target.value})} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowSalaryForm(false)} className="btn-secondary flex-1">Cancel</button>
+                  <button type="submit" className="btn-primary flex-1">Save</button>
+                </div>
+              </form>
+            )}
+
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {salaryRecords.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-4">No salary records</p>
+              ) : salaryRecords.map(s => (
+                <div key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{monthNames[s.month]} {s.year}</p>
+                    <p className="text-xs text-gray-500">
+                      Base: {formatCurrency(s.base_salary)}
+                      {s.bonus > 0 && ` + Bonus: ${formatCurrency(s.bonus)}`}
+                      {s.deductions > 0 && ` - Deductions: ${formatCurrency(s.deductions)}`}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold">{formatCurrency(s.net_salary)}</p>
+                    {s.status === 'paid' ? (
+                      <span className="text-xs text-green-600">Paid {formatDate(s.paid_date)}</span>
+                    ) : (
+                      ['super_admin', 'campus_admin'].includes(user?.role) && (
+                        <button onClick={() => markPaid(s.id)} className="text-xs font-medium text-white bg-green-600 hover:bg-green-700 px-2 py-0.5 rounded mt-1">Mark Paid</button>
+                      )
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end mt-4 pt-3 border-t">
+              <button onClick={() => setSalaryModal(null)} className="btn-secondary px-6">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NotificationsPage() {
   const [activeTab, setActiveTab] = useState('notifications')
   const [notifications, setNotifications] = useState([])
@@ -1800,9 +2099,10 @@ function App() {
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
-          <Route path="/classes" element={<ProtectedRoute><ClassesPage /></ProtectedRoute>} />
-          <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
+        <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
+        <Route path="/classes" element={<ProtectedRoute><ClassesPage /></ProtectedRoute>} />
+        <Route path="/teachers" element={<ProtectedRoute><TeachersPage /></ProtectedRoute>} />
+        <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
           <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
           <Route path="/announcements" element={<ProtectedRoute><AnnouncementsPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />

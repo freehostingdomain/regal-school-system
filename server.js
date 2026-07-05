@@ -13,6 +13,7 @@ const feeRoutes = require('./routes/fees');
 const dashboardRoutes = require('./routes/dashboard');
 const announcementRoutes = require('./routes/announcements');
 const notificationRoutes = require('./routes/notifications');
+const teacherRoutes = require('./routes/teachers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,25 +33,18 @@ app.use('/api/fees', feeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/teachers', teacherRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/teachers', authenticate, (req, res) => {
-  try {
-    const { getDb } = require('./database');
-    const db = getDb();
-    const teachers = db.prepare("SELECT id, name, email, role FROM users WHERE is_active = 1 AND role = 'teacher' ORDER BY name ASC").all();
-    res.json({ success: true, data: teachers });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
 const frontendDist = path.join(__dirname, 'frontend', 'dist');
 app.use(express.static(frontendDist));
 app.get('/{*splat}', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ success: false, message: 'API endpoint not found' });
+  }
   res.sendFile(path.join(frontendDist, 'index.html'));
 });
 
