@@ -18,10 +18,22 @@ function useAuth() {
 function api() {
   const token = localStorage.getItem('token')
   const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
-  return axios.create({
+  const instance = axios.create({
     baseURL: baseURL,
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    timeout: 30000
   })
+  instance.interceptors.response.use(
+    response => response,
+    async error => {
+      if (error.response?.status === 429) {
+        await new Promise(r => setTimeout(r, 3000))
+        return instance.request(error.config)
+      }
+      return Promise.reject(error)
+    }
+  )
+  return instance
 }
 
 function formatCurrency(amount) {
