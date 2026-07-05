@@ -875,10 +875,13 @@ function ClassFormModal({ show, onClose, onSave, cls }) {
 
 function SectionManagementModal({ show, onClose, cls }) {
   const [sections, setSections] = useState([])
+  const [teachers, setTeachers] = useState([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
+  const [newTeacherId, setNewTeacherId] = useState('')
   const [editId, setEditId] = useState(null)
   const [editName, setEditName] = useState('')
+  const [editTeacherId, setEditTeacherId] = useState('')
   const [message, setMessage] = useState('')
 
   const loadSections = () => {
@@ -889,14 +892,30 @@ function SectionManagementModal({ show, onClose, cls }) {
     }).catch(() => setLoading(false))
   }
 
+  const loadTeachers = () => {
+    api().get('/classes/teachers').then(res => {
+      setTeachers(res.data.data)
+    }).catch(() => {})
+  }
+
   useEffect(() => {
-    if (show) { loadSections(); setNewName(''); setEditId(null); setEditName('') }
+    if (show) {
+      loadSections()
+      loadTeachers()
+      setNewName('')
+      setNewTeacherId('')
+      setEditId(null)
+      setEditName('')
+      setEditTeacherId('')
+      setMessage('')
+    }
   }, [show, cls])
 
   const addSection = () => {
     if (!newName.trim()) return
-    api().post(`/classes/${cls.id}/sections`, { name: newName.trim() }).then(() => {
+    api().post(`/classes/${cls.id}/sections`, { name: newName.trim(), teacher_id: newTeacherId || null }).then(() => {
       setNewName('')
+      setNewTeacherId('')
       setMessage('Section added!')
       loadSections()
       setTimeout(() => setMessage(''), 2000)
@@ -905,9 +924,10 @@ function SectionManagementModal({ show, onClose, cls }) {
 
   const updateSection = (sectionId) => {
     if (!editName.trim()) return
-    api().put(`/classes/${cls.id}/sections/${sectionId}`, { name: editName.trim() }).then(() => {
+    api().put(`/classes/${cls.id}/sections/${sectionId}`, { name: editName.trim(), teacher_id: editTeacherId || null }).then(() => {
       setEditId(null)
       setEditName('')
+      setEditTeacherId('')
       setMessage('Section updated!')
       loadSections()
       setTimeout(() => setMessage(''), 2000)
@@ -927,7 +947,7 @@ function SectionManagementModal({ show, onClose, cls }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+      <div className="bg-white rounded-xl p-6 w-full max-w-lg">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Sections - {cls?.name}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
@@ -935,9 +955,16 @@ function SectionManagementModal({ show, onClose, cls }) {
 
         {message && <div className="bg-green-50 text-green-700 px-3 py-2 rounded-lg text-sm mb-3">{message}</div>}
 
-        <div className="flex gap-2 mb-4">
-          <input className="input-field flex-1" placeholder="New section name (e.g. A, B, C)" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSection()} />
-          <button onClick={addSection} className="btn-primary px-4"><Plus className="w-4 h-4" /></button>
+        <div className="bg-gray-50 rounded-lg p-3 mb-4">
+          <p className="text-sm font-medium text-gray-700 mb-2">Add New Section</p>
+          <div className="flex gap-2 mb-2">
+            <input className="input-field flex-1" placeholder="Section name (A, B, C...)" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSection()} />
+            <button onClick={addSection} className="btn-primary px-4"><Plus className="w-4 h-4" /></button>
+          </div>
+          <select className="input-field w-full" value={newTeacherId} onChange={e => setNewTeacherId(e.target.value)}>
+            <option value="">Assign Teacher (optional)</option>
+            {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
         </div>
 
         {loading ? (
@@ -945,30 +972,41 @@ function SectionManagementModal({ show, onClose, cls }) {
         ) : sections.length === 0 ? (
           <div className="text-center py-6 text-gray-400 text-sm">No sections yet. Add one above.</div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-80 overflow-y-auto">
             {sections.map(sec => (
-              <div key={sec.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
+              <div key={sec.id} className="bg-gray-50 rounded-lg px-4 py-3">
                 {editId === sec.id ? (
-                  <div className="flex items-center gap-2 flex-1">
-                    <input className="input-field flex-1 py-1.5" value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => e.key === 'Enter' && updateSection(sec.id)} autoFocus />
-                    <button onClick={() => updateSection(sec.id)} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg" title="Save"><Check className="w-4 h-4" /></button>
-                    <button onClick={() => { setEditId(null); setEditName('') }} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Cancel"><X className="w-4 h-4" /></button>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input className="input-field flex-1 py-1.5" value={editName} onChange={e => setEditName(e.target.value)} autoFocus />
+                      <button onClick={() => updateSection(sec.id)} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg" title="Save"><Check className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditId(null); setEditName(''); setEditTeacherId('') }} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Cancel"><X className="w-4 h-4" /></button>
+                    </div>
+                    <select className="input-field w-full py-1.5" value={editTeacherId} onChange={e => setEditTeacherId(e.target.value)}>
+                      <option value="">No Teacher</option>
+                      {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
                   </div>
                 ) : (
-                  <>
-                    <div>
-                      <span className="font-medium">{sec.name}</span>
-                      <span className="text-xs text-gray-500 ml-2">{sec.student_count || 0} students</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{sec.name}</span>
+                        <span className="text-xs text-gray-500">{sec.student_count || 0} students</span>
+                      </div>
+                      {sec.teacher_name && (
+                        <p className="text-xs text-blue-600 mt-0.5">Teacher: {sec.teacher_name}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => { setEditId(sec.id); setEditName(sec.name) }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                      <button onClick={() => { setEditId(sec.id); setEditName(sec.name); setEditTeacherId(sec.teacher_id || '') }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
                       <button onClick={() => deleteSection(sec.id, sec.name)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                       </button>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             ))}

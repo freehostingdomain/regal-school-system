@@ -5,6 +5,23 @@ const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
+router.get('/teachers', authenticate, (req, res) => {
+  try {
+    const db = getDb();
+    let query = `SELECT id, name, email, role FROM users WHERE is_active = 1 AND role = 'teacher'`;
+    const params = [];
+    if (req.user.role !== 'super_admin' && req.user.campus_id) {
+      query += ' AND campus_id = ?';
+      params.push(req.user.campus_id);
+    }
+    query += ' ORDER BY name ASC';
+    const teachers = db.prepare(query).all(...params);
+    res.json({ success: true, data: teachers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.get('/', authenticate, (req, res) => {
   try {
     const db = getDb();
@@ -117,10 +134,10 @@ router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin'), ac
 router.post('/:id/sections', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Section'), (req, res) => {
   try {
     const db = getDb();
-    const { name } = req.body;
+    const { name, teacher_id } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Section name is required.' });
 
-    const result = db.prepare('INSERT INTO sections (class_id, name) VALUES (?, ?)').run(req.params.id, name);
+    const result = db.prepare('INSERT INTO sections (class_id, name, teacher_id) VALUES (?, ?, ?)').run(req.params.id, name, teacher_id || null);
     const section = db.prepare('SELECT * FROM sections WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, message: 'Section added.', data: section });
   } catch (error) {
@@ -141,10 +158,15 @@ router.delete('/:classId/sections/:sectionId', authenticate, authorize('super_ad
 router.put('/:classId/sections/:sectionId', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Section'), (req, res) => {
   try {
     const db = getDb();
-    const { name } = req.body;
+    const { name, teacher_id } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Section name is required.' });
-    db.prepare('UPDATE sections SET name = ? WHERE id = ? AND is_active = 1').run(name, req.params.sectionId);
-    const section = db.prepare('SELECT * FROM sections WHERE id = ?').get(req.params.sectionId);
+    db.prepare('UPDATE sections SET name = ?, teacher_id = ? WHERE id = ? AND is_active = 1').run(name, teacher_id || null, req.params.sectionId);
+    const section = db.prepare(`
+      SELECT sec.*, u.name as teacher_name
+      FROM sections sec
+      LEFT JOIN users u ON sec.teacher_id = u.id
+      WHERE sec.id = ?
+    `).get(req.params.sectionId);
     res.json({ success: true, message: 'Section updated.', data: section });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
