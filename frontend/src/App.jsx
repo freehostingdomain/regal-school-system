@@ -147,10 +147,12 @@ function Sidebar({ collapsed, setCollapsed }) {
     { icon: GraduationCap, label: 'Classes', path: '/classes' },
     { icon: Briefcase, label: 'Teachers', path: '/teachers' },
     { icon: ClipboardCheck, label: 'Attendance', path: '/attendance' },
-    { icon: DollarSign, label: 'Finance', path: '/finance' },
+    { icon: DollarSign, label: 'Finance', path: '/finance', adminOnly: true },
     { icon: Bell, label: 'Announcements', path: '/announcements' },
     { icon: Activity, label: 'Notifications', path: '/notifications' },
   ]
+
+  const filteredMenu = menuItems.filter(item => !item.adminOnly || user?.role === 'super_admin')
 
   const isActive = (path) => location.pathname.startsWith(path)
 
@@ -171,7 +173,7 @@ function Sidebar({ collapsed, setCollapsed }) {
       </div>
 
       <nav className="flex-1 p-2 space-y-1">
-        {menuItems.map((item) => (
+        {filteredMenu.map((item) => (
           <Link
             key={item.path}
             to={item.path}
