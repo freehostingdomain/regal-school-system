@@ -4,6 +4,7 @@ const path = require('path');
 require('dotenv').config();
 
 const { initDatabase } = require('./database');
+const { authenticate } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const studentRoutes = require('./routes/students');
 const classRoutes = require('./routes/classes');
@@ -34,6 +35,17 @@ app.use('/api/notifications', notificationRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/teachers', authenticate, (req, res) => {
+  try {
+    const { getDb } = require('./database');
+    const db = getDb();
+    const teachers = db.prepare("SELECT id, name, email, role FROM users WHERE is_active = 1 AND role = 'teacher' ORDER BY name ASC").all();
+    res.json({ success: true, data: teachers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 const frontendDist = path.join(__dirname, 'frontend', 'dist');

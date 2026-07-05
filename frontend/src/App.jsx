@@ -893,7 +893,7 @@ function SectionManagementModal({ show, onClose, cls }) {
   }
 
   const loadTeachers = () => {
-    api().get('/classes/teachers').then(res => {
+    api().get('/teachers').then(res => {
       setTeachers(res.data.data)
     }).catch(() => {})
   }

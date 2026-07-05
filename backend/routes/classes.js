@@ -5,23 +5,6 @@ const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
-router.get('/teachers', authenticate, (req, res) => {
-  try {
-    const db = getDb();
-    let query = `SELECT id, name, email, role FROM users WHERE is_active = 1 AND role = 'teacher'`;
-    const params = [];
-    if (req.user.role !== 'super_admin' && req.user.campus_id) {
-      query += ' AND campus_id = ?';
-      params.push(req.user.campus_id);
-    }
-    query += ' ORDER BY name ASC';
-    const teachers = db.prepare(query).all(...params);
-    res.json({ success: true, data: teachers });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
 router.get('/', authenticate, (req, res) => {
   try {
     const db = getDb();
