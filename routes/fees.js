@@ -8,14 +8,70 @@ const router = express.Router();
 router.get('/structures', authenticate, async (req, res) => {
   try {
     const db = getDb();
-    const structures = await db.prepare(`
-      SELECT fs.*, c.name as class_name
+    let query = `
+      SELECT fs.*, c.name as class_name, c.campus_id, sc.name as campus_name
       FROM fee_structures fs
       JOIN classes c ON fs.class_id = c.id
+      LEFT JOIN campuses sc ON c.campus_id = sc.id
       WHERE fs.is_active = 1
-      ORDER BY c.sort_order ASC
-    `).all();
+    `;
+    const params = [];
+    if (req.user.role !== 'super_admin' && req.user.role !== 'accountant') {
+      query += ' AND c.campus_id = ?';
+      params.push(req.user.campus_id);
+    } else if (req.query.campus_id) {
+      query += ' AND c.campus_id = ?';
+      params.push(req.query.campus_id);
+    }
+    query += ' ORDER BY c.sort_order ASC, c.name ASC';
+    const structures = await db.prepare(query).all(...params);
     res.json({ success: true, data: structures });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/structures', authenticate, authorize('super_admin', 'campus_admin', 'accountant'), activityLogger('Fee Structure'), async (req, res) => {
+  try {
+    const db = getDb();
+    const { class_id, name, tuition_fee, exam_fee, transport_fee, lab_fee, activity_fee } = req.body;
+    if (!class_id || !name) {
+      return res.status(400).json({ success: false, message: 'Class and name are required.' });
+    }
+    const result = await db.prepare(`
+      INSERT INTO fee_structures (class_id, name, tuition_fee, exam_fee, transport_fee, lab_fee, activity_fee)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(class_id, name, tuition_fee || 0, exam_fee || 0, transport_fee || 0, lab_fee || 0, activity_fee || 0);
+    const structure = await db.prepare('SELECT * FROM fee_structures WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json({ success: true, message: 'Fee structure created.', data: structure });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.put('/structures/:id', authenticate, authorize('super_admin', 'campus_admin', 'accountant'), activityLogger('Fee Structure'), async (req, res) => {
+  try {
+    const db = getDb();
+    const { name, tuition_fee, exam_fee, transport_fee, lab_fee, activity_fee } = req.body;
+    await db.prepare(`
+      UPDATE fee_structures SET
+        name = COALESCE(?, name), tuition_fee = COALESCE(?, tuition_fee),
+        exam_fee = COALESCE(?, exam_fee), transport_fee = COALESCE(?, transport_fee),
+        lab_fee = COALESCE(?, lab_fee), activity_fee = COALESCE(?, activity_fee)
+      WHERE id = ?
+    `).run(name, tuition_fee, exam_fee, transport_fee, lab_fee, activity_fee, req.params.id);
+    const structure = await db.prepare('SELECT * FROM fee_structures WHERE id = ?').get(req.params.id);
+    res.json({ success: true, message: 'Fee structure updated.', data: structure });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.delete('/structures/:id', authenticate, authorize('super_admin', 'campus_admin', 'accountant'), activityLogger('Fee Structure'), async (req, res) => {
+  try {
+    const db = getDb();
+    await db.prepare('UPDATE fee_structures SET is_active = 0 WHERE id = ?').run(req.params.id);
+    res.json({ success: true, message: 'Fee structure deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -46,7 +102,10 @@ router.get('/vouchers', authenticate, async (req, res) => {
     } else if (req.user.role === 'student') {
       query += ` AND fv.student_id = $${paramIdx++}`;
       params.push(req.user.id);
-    } else if (req.user.role !== 'super_admin') {
+    } else if (req.query.campus_id) {
+      query += ` AND s.campus_id = $${paramIdx++}`;
+      params.push(req.query.campus_id);
+    } else if (req.user.role !== 'super_admin' && req.user.role !== 'accountant' && req.user.campus_id) {
       query += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
@@ -200,7 +259,10 @@ router.get('/reports', authenticate, authorize('super_admin', 'campus_admin', 't
     const params = [targetMonth, targetYear];
     let paramIdx = 3;
 
-    if (req.user.role !== 'super_admin') {
+    if (req.query.campus_id) {
+      query += ` AND s.campus_id = $${paramIdx++}`;
+      params.push(req.query.campus_id);
+    } else if (req.user.role !== 'super_admin' && req.user.role !== 'accountant' && req.user.campus_id) {
       query += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }

@@ -209,45 +209,103 @@ function Header() {
   const { selectedCampus, setSelectedCampus } = useCampus()
   const navigate = useNavigate()
   const [unreadCount, setUnreadCount] = useState(0)
+  const [showNotifDrop, setShowNotifDrop] = useState(false)
+  const [notifList, setNotifList] = useState([])
 
-  useEffect(() => {
+  const fetchNotifications = () => {
     api().get('/notifications').then(res => {
       setUnreadCount(res.data.unread_count)
     }).catch(() => {})
-    const interval = setInterval(() => {
-      api().get('/notifications').then(res => {
-        setUnreadCount(res.data.unread_count)
-      }).catch(() => {})
-    }, 30000)
+  }
+
+  useEffect(() => {
+    fetchNotifications()
+    const interval = setInterval(fetchNotifications, 30000)
     return () => clearInterval(interval)
   }, [])
 
+  const openNotifDrop = () => {
+    setShowNotifDrop(!showNotifDrop)
+    if (!showNotifDrop) {
+      api().get('/notifications?limit=10').then(res => {
+        setNotifList(res.data.data || [])
+      }).catch(() => {})
+    }
+  }
+
+  useEffect(() => {
+    if (!showNotifDrop) return
+    const handler = (e) => {
+      if (!e.target.closest('[data-notif-drop]')) setShowNotifDrop(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showNotifDrop])
+
+  const markRead = (id) => {
+    api().put(`/notifications/${id}/read`).then(() => {
+      setNotifList(notifList.map(n => n.id === id ? { ...n, is_read: 1 } : n))
+      setUnreadCount(prev => Math.max(0, prev - 1))
+    }).catch(() => {})
+  }
+
+  const markAllRead = () => {
+    api().put('/notifications/read-all').then(() => {
+      setNotifList(notifList.map(n => ({ ...n, is_read: 1 })))
+      setUnreadCount(0)
+    }).catch(() => {})
+  }
+
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+    <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between relative">
       <div>
         <h2 className="text-lg font-semibold text-gray-800">Welcome, {user?.name}</h2>
         <p className="text-sm text-gray-500">{user?.campus_name || 'All Campuses'}</p>
       </div>
       <div className="flex items-center gap-3">
-        {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
-          <select
-            className="input-field w-auto text-sm py-1.5 pr-8 border-blue-300 focus:border-blue-500 bg-blue-50"
-            value={selectedCampus || ''}
-            onChange={e => setSelectedCampus(e.target.value ? parseInt(e.target.value) : null)}
-          >
-            {user?.role === 'super_admin' && <option value="">All Campuses</option>}
-            <option value="1">Khanpur Road</option>
-            <option value="2">UET Campus</option>
-          </select>
-        )}
-        <button onClick={() => navigate('/notifications')} className="relative p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-          <Bell className="w-5 h-5" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
+        <select
+          className="input-field w-auto text-sm py-1.5 pr-8 border-blue-300 focus:border-blue-500 bg-blue-50"
+          value={selectedCampus || ''}
+          onChange={e => setSelectedCampus(e.target.value ? parseInt(e.target.value) : null)}
+        >
+          <option value="">All Campuses</option>
+          <option value="1">Khanpur Road</option>
+          <option value="2">UET Campus</option>
+        </select>
+        <div className="relative" data-notif-drop>
+          <button onClick={openNotifDrop} className="relative p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+            <Bell className="w-5 h-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+          {showNotifDrop && (
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <h3 className="font-bold text-sm">Notifications</h3>
+                {unreadCount > 0 && (
+                  <button onClick={markAllRead} className="text-xs text-blue-600 hover:text-blue-800">Mark all read</button>
+                )}
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {notifList.length === 0 ? (
+                  <p className="text-center text-gray-400 text-sm py-6">No notifications</p>
+                ) : notifList.map(n => (
+                  <div key={n.id} onClick={() => markRead(n.id)} className={`px-4 py-3 border-b cursor-pointer hover:bg-gray-50 transition-colors ${n.is_read ? 'bg-white' : 'bg-blue-50'}`}>
+                    <p className="text-sm font-medium text-gray-800">{n.title}</p>
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{n.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString('en-PK')}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="px-4 py-2 border-t text-center">
+                <button onClick={() => { setShowNotifDrop(false); navigate('/notifications') }} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All Notifications</button>
+              </div>
+            </div>
           )}
-        </button>
+        </div>
         <div className="text-right hidden md:block">
           <p className="text-sm font-medium text-gray-700">{new Date().toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           <p className="text-xs text-gray-500">{new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}</p>
@@ -1308,6 +1366,7 @@ function AttendancePage() {
 }
 
 function FinancePage() {
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('vouchers')
   const [vouchers, setVouchers] = useState([])
   const [summary, setSummary] = useState({})
@@ -1316,6 +1375,12 @@ function FinancePage() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const { selectedCampus } = useCampus()
+  const [structures, setStructures] = useState([])
+  const [classes, setClasses] = useState([])
+  const [showStructForm, setShowStructForm] = useState(false)
+  const [editStruct, setEditStruct] = useState(null)
+  const [structForm, setStructForm] = useState({ class_id: '', name: '', tuition_fee: '', exam_fee: '', transport_fee: '', lab_fee: '', activity_fee: '' })
+  const [message, setMessage] = useState('')
 
   const loadVouchers = () => {
     setLoading(true)
@@ -1328,8 +1393,19 @@ function FinancePage() {
     }).catch(() => setLoading(false))
   }
 
+  const loadStructures = () => {
+    setLoading(true)
+    const params = {}
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/fees/structures', { params }).then(res => {
+      setStructures(res.data.data)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
   useEffect(() => {
     if (activeTab === 'vouchers') loadVouchers()
+    if (activeTab === 'structures') { loadStructures(); api().get('/classes').then(r => setClasses(r.data.data)) }
   }, [activeTab, selectedCampus])
 
   const recordPayment = () => {
@@ -1345,12 +1421,44 @@ function FinancePage() {
     }).catch(err => alert(err.response?.data?.message || 'Payment failed'))
   }
 
+  const saveStruct = (e) => {
+    e.preventDefault()
+    const data = { ...structForm, class_id: parseInt(structForm.class_id), tuition_fee: parseFloat(structForm.tuition_fee) || 0, exam_fee: parseFloat(structForm.exam_fee) || 0, transport_fee: parseFloat(structForm.transport_fee) || 0, lab_fee: parseFloat(structForm.lab_fee) || 0, activity_fee: parseFloat(structForm.activity_fee) || 0 }
+    const method = editStruct ? 'put' : 'post'
+    const url = editStruct ? `/fees/structures/${editStruct.id}` : '/fees/structures'
+    api()[method](url, data).then(() => {
+      setMessage(editStruct ? 'Fee structure updated!' : 'Fee structure created!')
+      setShowStructForm(false)
+      setEditStruct(null)
+      setStructForm({ class_id: '', name: '', tuition_fee: '', exam_fee: '', transport_fee: '', lab_fee: '', activity_fee: '' })
+      loadStructures()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const deleteStruct = (id) => {
+    if (!confirm('Delete this fee structure?')) return
+    api().delete(`/fees/structures/${id}`).then(() => {
+      setMessage('Fee structure deleted!')
+      loadStructures()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const startEditStruct = (s) => {
+    setEditStruct(s)
+    setStructForm({ class_id: s.class_id, name: s.name, tuition_fee: s.tuition_fee, exam_fee: s.exam_fee, transport_fee: s.transport_fee, lab_fee: s.lab_fee, activity_fee: s.activity_fee })
+    setShowStructForm(true)
+  }
+
   const statusColors = {
     paid: 'bg-green-100 text-green-700',
     pending: 'bg-amber-100 text-amber-700',
     partial: 'bg-blue-100 text-blue-700',
     overdue: 'bg-red-100 text-red-700',
   }
+
+  const canEditFinance = ['super_admin', 'campus_admin', 'accountant'].includes(user?.role)
 
   return (
     <div className="space-y-4">
@@ -1447,8 +1555,112 @@ function FinancePage() {
       )}
 
       {activeTab === 'structures' && (
-        <div className="card">
-          <p className="text-gray-500">Fee structure management coming soon. Currently using class-level fee configuration.</p>
+        <div className="space-y-4">
+          {message && (
+            <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('deleted') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message}</div>
+          )}
+          {canEditFinance && (
+            <div className="flex justify-end">
+              <button onClick={() => { setEditStruct(null); setStructForm({ class_id: '', name: '', tuition_fee: '', exam_fee: '', transport_fee: '', lab_fee: '', activity_fee: '' }); setShowStructForm(!showStructForm) }} className="btn-primary">
+                <Plus className="w-4 h-4 mr-1 inline" /> Add Fee Structure
+              </button>
+            </div>
+          )}
+          {showStructForm && (
+            <div className="card">
+              <h3 className="font-bold mb-3">{editStruct ? 'Edit Fee Structure' : 'New Fee Structure'}</h3>
+              <form onSubmit={saveStruct} className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Class *</label>
+                    <select className="input-field" value={structForm.class_id} onChange={e => setStructForm({...structForm, class_id: e.target.value})} required>
+                      <option value="">Select Class</option>
+                      {classes.map(c => <option key={c.id} value={c.id}>{c.name} ({c.campus_name})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Structure Name *</label>
+                    <input className="input-field" value={structForm.name} onChange={e => setStructForm({...structForm, name: e.target.value})} required placeholder="e.g. Monthly Fee 2026" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="label">Tuition Fee (PKR)</label>
+                    <input type="number" className="input-field" value={structForm.tuition_fee} onChange={e => setStructForm({...structForm, tuition_fee: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Exam Fee (PKR)</label>
+                    <input type="number" className="input-field" value={structForm.exam_fee} onChange={e => setStructForm({...structForm, exam_fee: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Transport Fee (PKR)</label>
+                    <input type="number" className="input-field" value={structForm.transport_fee} onChange={e => setStructForm({...structForm, transport_fee: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Lab Fee (PKR)</label>
+                    <input type="number" className="input-field" value={structForm.lab_fee} onChange={e => setStructForm({...structForm, lab_fee: e.target.value})} min="0" />
+                  </div>
+                  <div>
+                    <label className="label">Activity Fee (PKR)</label>
+                    <input type="number" className="input-field" value={structForm.activity_fee} onChange={e => setStructForm({...structForm, activity_fee: e.target.value})} min="0" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => { setShowStructForm(false); setEditStruct(null) }} className="btn-secondary">Cancel</button>
+                  <button type="submit" className="btn-primary">{editStruct ? 'Update' : 'Create'}</button>
+                </div>
+              </form>
+            </div>
+          )}
+          <div className="card overflow-hidden p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="table-header">
+                    <th className="px-4 py-3">Class</th>
+                    <th className="px-4 py-3">Campus</th>
+                    <th className="px-4 py-3 text-right">Tuition</th>
+                    <th className="px-4 py-3 text-right">Exam</th>
+                    <th className="px-4 py-3 text-right">Transport</th>
+                    <th className="px-4 py-3 text-right">Lab</th>
+                    <th className="px-4 py-3 text-right">Activity</th>
+                    <th className="px-4 py-3 text-right">Total</th>
+                    {canEditFinance && <th className="px-4 py-3 text-center">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loading ? (
+                    <tr><td colSpan={canEditFinance ? 9 : 8} className="text-center py-10 text-gray-500">Loading...</td></tr>
+                  ) : structures.length === 0 ? (
+                    <tr><td colSpan={canEditFinance ? 9 : 8} className="text-center py-10 text-gray-500">No fee structures</td></tr>
+                  ) : structures.map(s => (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium">{s.class_name}</td>
+                      <td className="px-4 py-3 text-sm">{s.campus_name || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(s.tuition_fee)}</td>
+                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(s.exam_fee)}</td>
+                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(s.transport_fee)}</td>
+                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(s.lab_fee)}</td>
+                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(s.activity_fee)}</td>
+                      <td className="px-4 py-3 text-sm text-right font-bold">{formatCurrency((s.tuition_fee || 0) + (s.exam_fee || 0) + (s.transport_fee || 0) + (s.lab_fee || 0) + (s.activity_fee || 0))}</td>
+                      {canEditFinance && (
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => startEditStruct(s)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            </button>
+                            <button onClick={() => deleteStruct(s.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
