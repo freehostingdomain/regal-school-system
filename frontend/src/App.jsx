@@ -1493,6 +1493,7 @@ function AnnouncementsPage() {
   const [loading, setLoading] = useState(true)
   const { user } = useAuth()
   const [showForm, setShowForm] = useState(false)
+  const [editAnnouncement, setEditAnnouncement] = useState(null)
   const [form, setForm] = useState({ title: '', content: '', type: 'general' })
 
   useEffect(() => {
@@ -1511,6 +1512,35 @@ function AnnouncementsPage() {
     }).catch(err => alert(err.response?.data?.message || 'Failed'))
   }
 
+  const handleUpdate = (e) => {
+    e.preventDefault()
+    api().put(`/announcements/${editAnnouncement.id}`, form).then(res => {
+      setAnnouncements(announcements.map(a => a.id === editAnnouncement.id ? res.data.data : a))
+      setEditAnnouncement(null)
+      setShowForm(false)
+      setForm({ title: '', content: '', type: 'general' })
+    }).catch(err => alert(err.response?.data?.message || 'Failed'))
+  }
+
+  const startEdit = (a) => {
+    setEditAnnouncement(a)
+    setForm({ title: a.title, content: a.content, type: a.type || 'general' })
+    setShowForm(true)
+  }
+
+  const handleDelete = (id) => {
+    if (!confirm('Delete this announcement?')) return
+    api().delete(`/announcements/${id}`).then(() => {
+      setAnnouncements(announcements.filter(a => a.id !== id))
+    }).catch(err => alert(err.response?.data?.message || 'Failed'))
+  }
+
+  const openCreate = () => {
+    setEditAnnouncement(null)
+    setForm({ title: '', content: '', type: 'general' })
+    setShowForm(!showForm)
+  }
+
   const typeColors = {
     general: 'bg-blue-100 text-blue-700',
     urgent: 'bg-red-100 text-red-700',
@@ -1522,8 +1552,8 @@ function AnnouncementsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Announcements</h1>
-        {['super_admin', 'campus_admin', 'teacher', 'accountant'].includes(user?.role) && (
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+        {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
+          <button onClick={openCreate} className="btn-primary">
             <Plus className="w-4 h-4 mr-1 inline" /> New Announcement
           </button>
         )}
@@ -1531,7 +1561,7 @@ function AnnouncementsPage() {
 
       {showForm && (
         <div className="card">
-          <form onSubmit={handleCreate} className="space-y-3">
+          <form onSubmit={editAnnouncement ? handleUpdate : handleCreate} className="space-y-3">
             <div>
               <label className="label">Title</label>
               <input className="input-field" value={form.title} onChange={e => setForm({...form, title: e.target.value})} required />
@@ -1550,8 +1580,8 @@ function AnnouncementsPage() {
               </select>
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
-              <button type="submit" className="btn-primary">Create</button>
+              <button type="button" onClick={() => { setShowForm(false); setEditAnnouncement(null); setForm({ title: '', content: '', type: 'general' }) }} className="btn-secondary">Cancel</button>
+              <button type="submit" className="btn-primary">{editAnnouncement ? 'Update' : 'Create'}</button>
             </div>
           </form>
         </div>
@@ -1577,6 +1607,16 @@ function AnnouncementsPage() {
                   <p className="text-gray-600 mt-1">{a.content}</p>
                   <p className="text-xs text-gray-400 mt-3">By {a.created_by_name} &middot; {formatDate(a.created_at)}</p>
                 </div>
+                {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
+                  <div className="flex items-center gap-1 ml-4">
+                    <button onClick={() => startEdit(a)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                    <button onClick={() => handleDelete(a.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -1593,6 +1633,7 @@ function TeachersPage() {
   const [teachers, setTeachers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editTeacher, setEditTeacher] = useState(null)
   const [message, setMessage] = useState('')
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' })
   const [salaryModal, setSalaryModal] = useState(null)
@@ -1621,6 +1662,26 @@ function TeachersPage() {
       loadTeachers()
       setTimeout(() => setMessage(''), 3000)
     }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const handleEditTeacher = (e) => {
+    e.preventDefault()
+    const data = { name: form.name, email: form.email, phone: form.phone }
+    if (form.campus_id) data.campus_id = form.campus_id
+    api().put(`/teachers/${editTeacher.id}`, data).then(() => {
+      setMessage('Teacher updated!')
+      setShowForm(false)
+      setEditTeacher(null)
+      setForm({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' })
+      loadTeachers()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const startEditTeacher = (t) => {
+    setEditTeacher(t)
+    setForm({ name: t.name, email: t.email, phone: t.phone || '', password: '', campus_id: t.campus_id || '', base_salary: '' })
+    setShowForm(true)
   }
 
   const handleDelete = (teacher) => {
@@ -1712,7 +1773,7 @@ function TeachersPage() {
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">{teachers.length} teachers</span>
           {['super_admin', 'campus_admin'].includes(user?.role) && (
-            <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+            <button onClick={() => { setEditTeacher(null); setForm({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' }); setShowForm(!showForm) }} className="btn-primary">
               <UserPlus className="w-4 h-4 mr-1 inline" /> Add Teacher
             </button>
           )}
@@ -1725,8 +1786,8 @@ function TeachersPage() {
 
       {showForm && (
         <div className="card">
-          <h3 className="font-bold mb-3">Add New Teacher</h3>
-          <form onSubmit={handleAdd} className="space-y-3">
+          <h3 className="font-bold mb-3">{editTeacher ? 'Edit Teacher' : 'Add New Teacher'}</h3>
+          <form onSubmit={editTeacher ? handleEditTeacher : handleAdd} className="space-y-3">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Full Name *</label>
@@ -1740,10 +1801,12 @@ function TeachersPage() {
                 <label className="label">Phone</label>
                 <input className="input-field" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
               </div>
-              <div>
-                <label className="label">Password *</label>
-                <input type="password" className="input-field" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
-              </div>
+              {!editTeacher && (
+                <div>
+                  <label className="label">Password *</label>
+                  <input type="password" className="input-field" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+                </div>
+              )}
               {user?.role === 'super_admin' && (
                 <div>
                   <label className="label">Campus</label>
@@ -1754,14 +1817,16 @@ function TeachersPage() {
                   </select>
                 </div>
               )}
-              <div>
-                <label className="label">Monthly Salary (PKR)</label>
-                <input type="number" className="input-field" value={form.base_salary} onChange={e => setForm({...form, base_salary: e.target.value})} min="0" />
-              </div>
+              {!editTeacher && (
+                <div>
+                  <label className="label">Monthly Salary (PKR)</label>
+                  <input type="number" className="input-field" value={form.base_salary} onChange={e => setForm({...form, base_salary: e.target.value})} min="0" />
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
-              <button type="submit" className="btn-primary">Add Teacher</button>
+              <button type="button" onClick={() => { setShowForm(false); setEditTeacher(null); setForm({ name: '', email: '', phone: '', password: '', campus_id: '', base_salary: '' }) }} className="btn-secondary">Cancel</button>
+              <button type="submit" className="btn-primary">{editTeacher ? 'Update Teacher' : 'Add Teacher'}</button>
             </div>
           </form>
         </div>
@@ -1803,9 +1868,14 @@ function TeachersPage() {
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => openSalaryModal(t)} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg" title="Salary">Salary</button>
                       {['super_admin', 'campus_admin'].includes(user?.role) && (
-                        <button onClick={() => handleDelete(t)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Remove">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
+                        <>
+                          <button onClick={() => startEditTeacher(t)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          </button>
+                          <button onClick={() => handleDelete(t)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Remove">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>

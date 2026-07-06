@@ -65,4 +65,41 @@ router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin', 'te
   }
 });
 
+router.put('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Announcement'), async (req, res) => {
+  try {
+    const db = getDb();
+    const { title, content, type, campus_id } = req.body;
+
+    const existing = await db.prepare('SELECT * FROM announcements WHERE id = ? AND is_active = 1').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Announcement not found.' });
+    }
+
+    let targetCampus = existing.campus_id;
+    if (req.user.role === 'super_admin' && campus_id !== undefined) {
+      targetCampus = campus_id || null;
+    } else if (req.user.role === 'campus_admin') {
+      targetCampus = req.user.campus_id;
+    }
+
+    await db.prepare(`
+      UPDATE announcements SET title = COALESCE(?, title), content = COALESCE(?, content),
+      type = COALESCE(?, type), campus_id = ?
+      WHERE id = ?
+    `).run(title || null, content || null, type || null, targetCampus, req.params.id);
+
+    const announcement = await db.prepare(`
+      SELECT a.*, u.name as created_by_name, c.name as campus_name
+      FROM announcements a
+      LEFT JOIN users u ON a.created_by = u.id
+      LEFT JOIN campuses c ON a.campus_id = c.id
+      WHERE a.id = ?
+    `).get(req.params.id);
+
+    res.json({ success: true, message: 'Announcement updated.', data: announcement });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

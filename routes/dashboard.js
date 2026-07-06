@@ -11,6 +11,8 @@ router.get('/', authenticate, async (req, res) => {
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
 
+    const campusIdFilter = req.query.campus_id ? parseInt(req.query.campus_id) : null;
+
     let campusFilter = '';
     let paramIdx = 1;
     const params = [];
@@ -18,26 +20,45 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role !== 'super_admin') {
       campusFilter = ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
+    } else if (campusIdFilter) {
+      campusFilter = ` AND s.campus_id = $${paramIdx++}`;
+      params.push(campusIdFilter);
     }
 
     const totalStudents = (await pool.query(
       `SELECT COUNT(*) as count FROM students s WHERE s.is_active = 1${campusFilter}`, params
     )).rows[0].count;
 
-    const campusParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
-    const campusFilterAlt = req.user.role !== 'super_admin' ? ` AND c.campus_id = $1` : '';
+    let campusFilterAlt = '';
+    let campusParams = [];
+    if (req.user.role !== 'super_admin') {
+      campusFilterAlt = ` AND c.campus_id = $1`;
+      campusParams = [req.user.campus_id];
+    } else if (campusIdFilter) {
+      campusFilterAlt = ` AND c.campus_id = $1`;
+      campusParams = [campusIdFilter];
+    }
 
     const totalClasses = (await pool.query(
       `SELECT COUNT(*) as count FROM classes c WHERE c.is_active = 1${campusFilterAlt}`, campusParams
     )).rows[0].count;
 
-    const teacherFilterAlt = req.user.role !== 'super_admin' ? ` AND u.campus_id = $1` : '';
+    let teacherFilterAlt = '';
+    let teacherParams = [];
+    if (req.user.role !== 'super_admin') {
+      teacherFilterAlt = ` AND u.campus_id = $1`;
+      teacherParams = [req.user.campus_id];
+    } else if (campusIdFilter) {
+      teacherFilterAlt = ` AND u.campus_id = $1`;
+      teacherParams = [campusIdFilter];
+    }
     const totalTeachers = (await pool.query(
-      `SELECT COUNT(*) as count FROM users u WHERE u.role = 'teacher' AND u.is_active = 1${teacherFilterAlt}`, campusParams
+      `SELECT COUNT(*) as count FROM users u WHERE u.role = 'teacher' AND u.is_active = 1${teacherFilterAlt}`, teacherParams
     )).rows[0].count;
 
-    const attendanceParams = [today, ...(req.user.role !== 'super_admin' ? [req.user.campus_id] : [])];
-    const attendanceFilterAlt = req.user.role !== 'super_admin' ? ` AND s.campus_id = $2` : '';
+    const attendanceCampusParam = req.user.role !== 'super_admin' ? req.user.campus_id : (campusIdFilter || null);
+    const attendanceFilterAlt = attendanceCampusParam ? ` AND s.campus_id = $2` : '';
+    const attendanceParams = attendanceCampusParam ? [today, attendanceCampusParam] : [today];
     const todayAttendance = (await pool.query(`
       SELECT a.status, COUNT(*) as count
       FROM attendance a
@@ -62,17 +83,26 @@ router.get('/', authenticate, async (req, res) => {
         COUNT(CASE WHEN fv.status = 'paid' THEN 1 END) as paid_count,
         COUNT(CASE WHEN fv.status != 'paid' THEN 1 END) as pending_count
       FROM fee_vouchers fv`;
-    const feeParams = [currentMonth, currentYear];
-    if (req.user.role !== 'super_admin' && req.user.campus_id) {
+    const feeCampusParam = req.user.role !== 'super_admin' ? req.user.campus_id : (campusIdFilter || null);
+    let feeParams;
+    if (feeCampusParam) {
       feeSql += ` JOIN students s ON fv.student_id = s.id WHERE fv.month = $1 AND fv.year = $2 AND s.campus_id = $3`;
-      feeParams.push(req.user.campus_id);
+      feeParams = [currentMonth, currentYear, feeCampusParam];
     } else {
       feeSql += ` WHERE fv.month = $1 AND fv.year = $2`;
+      feeParams = [currentMonth, currentYear];
     }
     const feeSummary = (await pool.query(feeSql, feeParams)).rows[0];
 
-    const recentStudentsParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
-    const recentStudentsFilter = req.user.role !== 'super_admin' ? ` AND s.campus_id = $1` : '';
+    let recentStudentsFilter = '';
+    let recentStudentsParams = [];
+    if (req.user.role !== 'super_admin') {
+      recentStudentsFilter = ` AND s.campus_id = $1`;
+      recentStudentsParams = [req.user.campus_id];
+    } else if (campusIdFilter) {
+      recentStudentsFilter = ` AND s.campus_id = $1`;
+      recentStudentsParams = [campusIdFilter];
+    }
     const recentStudents = (await pool.query(`
       SELECT s.id, s.student_id, s.first_name, s.last_name, s.father_name, s.admission_date,
              c.name as class_name, sc.name as campus_name
@@ -83,8 +113,15 @@ router.get('/', authenticate, async (req, res) => {
       ORDER BY s.created_at DESC LIMIT 5
     `, recentStudentsParams)).rows;
 
-    const announcementParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
-    const announcementFilter = req.user.role !== 'super_admin' ? ` AND (a.campus_id IS NULL OR a.campus_id = $1)` : '';
+    let announcementFilter = '';
+    let announcementParams = [];
+    if (req.user.role !== 'super_admin') {
+      announcementFilter = ` AND (a.campus_id IS NULL OR a.campus_id = $1)`;
+      announcementParams = [req.user.campus_id];
+    } else if (campusIdFilter) {
+      announcementFilter = ` AND (a.campus_id IS NULL OR a.campus_id = $1)`;
+      announcementParams = [campusIdFilter];
+    }
     const announcements = (await pool.query(`
       SELECT * FROM announcements
       WHERE is_active = 1${announcementFilter}
@@ -97,10 +134,11 @@ router.get('/', authenticate, async (req, res) => {
              COUNT(*) as total
       FROM attendance a`;
     const monthlyAttParams = [];
-    if (req.user.role !== 'super_admin' && req.user.campus_id) {
+    const monthlyCampusParam = req.user.role !== 'super_admin' ? req.user.campus_id : (campusIdFilter || null);
+    if (monthlyCampusParam) {
       monthlyAttSql += ` JOIN students s ON a.student_id = s.id`;
       monthlyAttSql += ` WHERE a.date >= (CURRENT_DATE - INTERVAL '6 months')::text AND s.campus_id = $1`;
-      monthlyAttParams.push(req.user.campus_id);
+      monthlyAttParams.push(monthlyCampusParam);
     } else {
       monthlyAttSql += ` WHERE a.date >= (CURRENT_DATE - INTERVAL '6 months')::text`;
     }

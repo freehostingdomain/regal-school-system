@@ -19,6 +19,9 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role !== 'super_admin') {
       query += ' AND c.campus_id = ?';
       params.push(req.user.campus_id);
+    } else if (req.query.campus_id) {
+      query += ' AND c.campus_id = ?';
+      params.push(req.query.campus_id);
     }
 
     query += ' ORDER BY c.sort_order ASC, c.name ASC';
