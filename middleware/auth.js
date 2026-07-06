@@ -40,7 +40,6 @@ function authorize(...roles) {
 
 function campusAccess(req, res, next) {
   if (req.user.role === 'super_admin') return next();
-
   const campusId = req.params.campusId || req.body.campus_id;
   if (campusId && req.user.campus_id !== campusId) {
     return res.status(403).json({ success: false, message: 'Access denied to this campus.' });

@@ -54,16 +54,22 @@ router.get('/', authenticate, async (req, res) => {
       attendanceSummary.total += parseInt(a.count);
     });
 
-    const feeSummary = (await pool.query(`
+    let feeSql = `
       SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as paid,
-        SUM(CASE WHEN status != 'paid' THEN total_amount ELSE 0 END) as pending,
-        COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
-        COUNT(CASE WHEN status != 'paid' THEN 1 END) as pending_count
-      FROM fee_vouchers
-      WHERE month = $1 AND year = $2
-    `, [currentMonth, currentYear])).rows[0];
+        SUM(CASE WHEN fv.status = 'paid' THEN fv.total_amount ELSE 0 END) as paid,
+        SUM(CASE WHEN fv.status != 'paid' THEN fv.total_amount ELSE 0 END) as pending,
+        COUNT(CASE WHEN fv.status = 'paid' THEN 1 END) as paid_count,
+        COUNT(CASE WHEN fv.status != 'paid' THEN 1 END) as pending_count
+      FROM fee_vouchers fv`;
+    const feeParams = [currentMonth, currentYear];
+    if (req.user.role !== 'super_admin' && req.user.campus_id) {
+      feeSql += ` JOIN students s ON fv.student_id = s.id WHERE fv.month = $1 AND fv.year = $2 AND s.campus_id = $3`;
+      feeParams.push(req.user.campus_id);
+    } else {
+      feeSql += ` WHERE fv.month = $1 AND fv.year = $2`;
+    }
+    const feeSummary = (await pool.query(feeSql, feeParams)).rows[0];
 
     const recentStudentsParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
     const recentStudentsFilter = req.user.role !== 'super_admin' ? ` AND s.campus_id = $1` : '';
@@ -85,15 +91,21 @@ router.get('/', authenticate, async (req, res) => {
       ORDER BY created_at DESC LIMIT 5
     `, announcementParams)).rows;
 
-    const monthlyAttendance = (await pool.query(`
-      SELECT TO_CHAR(date::date, 'YYYY-MM') as month,
-             SUM(CASE WHEN status IN ('present', 'late') THEN 1 ELSE 0 END) as present_count,
+    let monthlyAttSql = `
+      SELECT TO_CHAR(a.date::date, 'YYYY-MM') as month,
+             SUM(CASE WHEN a.status IN ('present', 'late') THEN 1 ELSE 0 END) as present_count,
              COUNT(*) as total
-      FROM attendance
-      WHERE date >= (CURRENT_DATE - INTERVAL '6 months')::text
-      GROUP BY TO_CHAR(date::date, 'YYYY-MM')
-      ORDER BY month ASC
-    `)).rows;
+      FROM attendance a`;
+    const monthlyAttParams = [];
+    if (req.user.role !== 'super_admin' && req.user.campus_id) {
+      monthlyAttSql += ` JOIN students s ON a.student_id = s.id`;
+      monthlyAttSql += ` WHERE a.date >= (CURRENT_DATE - INTERVAL '6 months')::text AND s.campus_id = $1`;
+      monthlyAttParams.push(req.user.campus_id);
+    } else {
+      monthlyAttSql += ` WHERE a.date >= (CURRENT_DATE - INTERVAL '6 months')::text`;
+    }
+    monthlyAttSql += ` GROUP BY TO_CHAR(a.date::date, 'YYYY-MM') ORDER BY month ASC`;
+    const monthlyAttendance = (await pool.query(monthlyAttSql, monthlyAttParams)).rows;
 
     let campusStats = null;
     if (req.user.role === 'super_admin') {

@@ -86,7 +86,7 @@ function getDb() {
 }
 
 function initDatabase() {
-  console.log('Database: Using Supabase PostgreSQL');
+  console.log('Database: Using Supabase PostgreSQL (pooler)');
 }
 
 module.exports = { getDb, initDatabase, getPool };

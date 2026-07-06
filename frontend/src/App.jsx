@@ -142,17 +142,17 @@ function Sidebar({ collapsed, setCollapsed }) {
   const location = useLocation()
 
   const menuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-    { icon: Users, label: 'Students', path: '/students' },
-    { icon: GraduationCap, label: 'Classes', path: '/classes' },
-    { icon: Briefcase, label: 'Teachers', path: '/teachers' },
-    { icon: ClipboardCheck, label: 'Attendance', path: '/attendance' },
-    { icon: DollarSign, label: 'Finance', path: '/finance', adminOnly: true },
-    { icon: Bell, label: 'Announcements', path: '/announcements' },
-    { icon: Activity, label: 'Notifications', path: '/notifications' },
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['super_admin', 'campus_admin', 'teacher', 'accountant'] },
+    { icon: Users, label: 'Students', path: '/students', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: GraduationCap, label: 'Classes', path: '/classes', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: Briefcase, label: 'Teachers', path: '/teachers', roles: ['super_admin', 'campus_admin'] },
+    { icon: ClipboardCheck, label: 'Attendance', path: '/attendance', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: DollarSign, label: 'Finance', path: '/finance', roles: ['super_admin', 'campus_admin', 'accountant'] },
+    { icon: Bell, label: 'Announcements', path: '/announcements', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: Activity, label: 'Notifications', path: '/notifications', roles: ['super_admin', 'campus_admin', 'teacher', 'accountant'] },
   ]
 
-  const filteredMenu = menuItems.filter(item => !item.adminOnly || user?.role === 'super_admin')
+  const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role))
 
   const isActive = (path) => location.pathname.startsWith(path)
 
@@ -229,13 +229,13 @@ function Header() {
         <p className="text-sm text-gray-500">{user?.campus_name || 'All Campuses'}</p>
       </div>
       <div className="flex items-center gap-3">
-        {user?.role === 'super_admin' && (
+        {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
           <select
             className="input-field w-auto text-sm py-1.5 pr-8 border-blue-300 focus:border-blue-500 bg-blue-50"
             value={selectedCampus || ''}
             onChange={e => setSelectedCampus(e.target.value ? parseInt(e.target.value) : null)}
           >
-            <option value="">All Campuses</option>
+            {user?.role === 'super_admin' && <option value="">All Campuses</option>}
             <option value="1">Khanpur Road</option>
             <option value="2">UET Campus</option>
           </select>
@@ -2100,9 +2100,10 @@ function Layout({ children }) {
   )
 }
 
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children, allowedRoles }) {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" />
+  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/dashboard" />
   return <Layout>{children}</Layout>
 }
 
@@ -2148,12 +2149,12 @@ function App() {
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
-        <Route path="/classes" element={<ProtectedRoute><ClassesPage /></ProtectedRoute>} />
-        <Route path="/teachers" element={<ProtectedRoute><TeachersPage /></ProtectedRoute>} />
-        <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
-          <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
-          <Route path="/announcements" element={<ProtectedRoute><AnnouncementsPage /></ProtectedRoute>} />
+        <Route path="/students" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><StudentsPage /></ProtectedRoute>} />
+        <Route path="/classes" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ClassesPage /></ProtectedRoute>} />
+        <Route path="/teachers" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin']}><TeachersPage /></ProtectedRoute>} />
+        <Route path="/attendance" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><AttendancePage /></ProtectedRoute>} />
+          <Route path="/finance" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','accountant']}><FinancePage /></ProtectedRoute>} />
+          <Route path="/announcements" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><AnnouncementsPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
