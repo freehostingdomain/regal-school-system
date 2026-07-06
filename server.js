@@ -50,6 +50,10 @@ app.get('/{*splat}', (req, res) => {
 
 initDatabase();
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+if (process.env.NETLIFY) {
+  module.exports = app;
+} else {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}

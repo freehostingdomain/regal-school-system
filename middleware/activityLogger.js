@@ -1,35 +1,30 @@
 const { getDb } = require('../database');
 
-function logActivity(user, action, entityType, entityId, entityName, details, ipAddress) {
+async function logActivity(user, action, entityType, entityId, entityName, details, ipAddress) {
   try {
     const db = getDb();
-    
-    db.prepare(`
+
+    await db.prepare(`
       INSERT INTO activity_logs (user_id, user_name, user_role, action, entity_type, entity_id, entity_name, details, ip_address)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      user.id,
-      user.name,
-      user.role,
-      action,
-      entityType,
-      entityId || null,
-      entityName || '',
-      details || '',
-      ipAddress || ''
+      user.id, user.name, user.role, action, entityType,
+      entityId || null, entityName || '', details || '', ipAddress || ''
     );
 
     if (user.role !== 'super_admin') {
-      const superAdmins = db.prepare("SELECT id FROM users WHERE role = 'super_admin' AND is_active = 1").all();
-      for (const admin of superAdmins) {
-        db.prepare(`
-          INSERT INTO notifications (user_id, title, message, type)
-          VALUES (?, ?, ?, 'activity')
-        `).run(
-          admin.id,
-          `${action} ${entityType}`,
-          `${user.name} (${user.role}) ${action} ${entityType}: "${entityName}"${details ? ' - ' + details : ''}`
-        );
+      const superAdmins = await db.prepare("SELECT id FROM users WHERE role = 'super_admin' AND is_active = 1").all();
+      if (superAdmins.length > 0) {
+        for (const admin of superAdmins) {
+          await db.prepare(`
+            INSERT INTO notifications (user_id, title, message, type)
+            VALUES (?, ?, ?, 'activity')
+          `).run(
+            admin.id,
+            `${action} ${entityType}`,
+            `${user.name} (${user.role}) ${action} ${entityType}: "${entityName}"${details ? ' - ' + details : ''}`
+          );
+        }
       }
     }
   } catch (error) {
@@ -40,7 +35,7 @@ function logActivity(user, action, entityType, entityId, entityName, details, ip
 function activityLogger(entityType) {
   return (req, res, next) => {
     const originalJson = res.json.bind(res);
-    
+
     res.json = function(data) {
       if (res.statusCode >= 200 && res.statusCode < 300 && req.user) {
         let action = 'viewed';
@@ -76,20 +71,15 @@ function activityLogger(entityType) {
 
         if (action !== 'viewed') {
           logActivity(
-            req.user,
-            action,
-            entityType,
-            entityId,
-            entityName,
-            details,
-            req.ip
-          );
+            req.user, action, entityType, entityId,
+            entityName, details, req.ip
+          ).catch(err => console.error('Async log error:', err.message));
         }
       }
-      
+
       return originalJson(data);
     };
-    
+
     next();
   };
 }

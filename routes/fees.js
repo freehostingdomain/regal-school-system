@@ -1,14 +1,14 @@
 const express = require('express');
-const { getDb } = require('../database');
+const { getDb, getPool } = require('../database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
-router.get('/structures', authenticate, (req, res) => {
+router.get('/structures', authenticate, async (req, res) => {
   try {
     const db = getDb();
-    const structures = db.prepare(`
+    const structures = await db.prepare(`
       SELECT fs.*, c.name as class_name
       FROM fee_structures fs
       JOIN classes c ON fs.class_id = c.id
@@ -21,7 +21,7 @@ router.get('/structures', authenticate, (req, res) => {
   }
 });
 
-router.get('/vouchers', authenticate, (req, res) => {
+router.get('/vouchers', authenticate, async (req, res) => {
   try {
     const db = getDb();
     const { status, month, year, student_id } = req.query;
@@ -35,28 +35,29 @@ router.get('/vouchers', authenticate, (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+    let paramIdx = 1;
 
     if (req.user.role === 'parent') {
-      const student = db.prepare('SELECT id FROM students WHERE parent_id = (SELECT id FROM parents WHERE user_id = ?)').get(req.user.id);
+      const student = await db.prepare('SELECT id FROM students WHERE parent_id = (SELECT id FROM parents WHERE user_id = ?)').get(req.user.id);
       if (student) {
-        query += ' AND fv.student_id = ?';
+        query += ` AND fv.student_id = $${paramIdx++}`;
         params.push(student.id);
       }
     } else if (req.user.role === 'student') {
-      query += ' AND fv.student_id = ?';
+      query += ` AND fv.student_id = $${paramIdx++}`;
       params.push(req.user.id);
     } else if (req.user.role !== 'super_admin') {
-      query += ' AND s.campus_id = ?';
+      query += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
-    if (status) { query += ' AND fv.status = ?'; params.push(status); }
-    if (month) { query += ' AND fv.month = ?'; params.push(month); }
-    if (year) { query += ' AND fv.year = ?'; params.push(year); }
-    if (student_id) { query += ' AND fv.student_id = ?'; params.push(student_id); }
+    if (status) { query += ` AND fv.status = $${paramIdx++}`; params.push(status); }
+    if (month) { query += ` AND fv.month = $${paramIdx++}`; params.push(month); }
+    if (year) { query += ` AND fv.year = $${paramIdx++}`; params.push(year); }
+    if (student_id) { query += ` AND fv.student_id = $${paramIdx++}`; params.push(student_id); }
 
     query += ' ORDER BY fv.year DESC, fv.month DESC, s.student_id ASC';
-    const vouchers = db.prepare(query).all(...params);
+    const vouchers = await db.prepare(query).all(...params);
 
     const summary = {
       total: vouchers.length,
@@ -75,80 +76,96 @@ router.get('/vouchers', authenticate, (req, res) => {
   }
 });
 
-router.post('/vouchers/generate', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Fee Voucher'), (req, res) => {
+router.post('/vouchers/generate', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Fee Voucher'), async (req, res) => {
   try {
-    const db = getDb();
     const { month, year, campus_id } = req.body;
 
     if (!month || !year) {
       return res.status(400).json({ success: false, message: 'Month and year are required.' });
     }
 
+    const pool = getPool();
     let studentQuery = 'SELECT s.*, c.monthly_fee, c.exam_fee FROM students s JOIN classes c ON s.class_id = c.id WHERE s.is_active = 1';
     const params = [];
+    let paramIdx = 1;
 
     if (req.user.role !== 'super_admin' && campus_id) {
-      studentQuery += ' AND s.campus_id = ?';
+      studentQuery += ` AND s.campus_id = $${paramIdx++}`;
       params.push(campus_id);
     } else if (req.user.role !== 'super_admin') {
-      studentQuery += ' AND s.campus_id = ?';
+      studentQuery += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
-    const students = db.prepare(studentQuery).all(...params);
+    const studentsResult = await pool.query(studentQuery, params);
+    const students = studentsResult.rows;
     let generated = 0;
 
-    const insertVoucher = db.prepare(`
-      INSERT OR IGNORE INTO fee_vouchers (student_id, voucher_number, month, year, tuition_fee, exam_fee, transport_fee, total_amount, due_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const countResult = await pool.query('SELECT COUNT(*) as c FROM fee_vouchers WHERE month = $1 AND year = $2', [month, year]);
+    let count = parseInt(countResult.rows[0].c);
 
-    const gen = db.transaction((studs) => {
-      let count = db.prepare('SELECT COUNT(*) as c FROM fee_vouchers WHERE month = ? AND year = ?').get(month, year);
-      for (const student of studs) {
-        const voucherNum = `RMS-FV-${year}-${String(count.c + generated + 1).padStart(4, '0')}`;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const student of students) {
+        count++;
+        const voucherNum = `RMS-FV-${year}-${String(count).padStart(4, '0')}`;
         const tuition = student.monthly_fee || 0;
         const exam = (student.exam_fee || 0) / 3;
         const transport = 0;
         const total = tuition + exam + transport;
-        insertVoucher.run(student.id, voucherNum, month, year, tuition, exam, transport, total, `${year}-${String(month).padStart(2, '0')}-10`);
+        const dueDate = `${year}-${String(month).padStart(2, '0')}-10`;
+
+        await client.query(`
+          INSERT INTO fee_vouchers (student_id, voucher_number, month, year, tuition_fee, exam_fee, transport_fee, total_amount, due_date)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (voucher_number) DO NOTHING
+        `, [student.id, voucherNum, month, year, tuition, exam, transport, total, dueDate]);
         generated++;
       }
-    });
 
-    gen(students);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
     res.json({ success: true, message: `Generated ${generated} fee vouchers.`, generated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.post('/payments', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Fee Payment'), (req, res) => {
+router.post('/payments', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Fee Payment'), async (req, res) => {
   try {
     const db = getDb();
+    const pool = getPool();
     const { voucher_id, amount, payment_method, transaction_id, notes } = req.body;
 
-    const voucher = db.prepare('SELECT * FROM fee_vouchers WHERE id = ?').get(voucher_id);
+    const voucher = await db.prepare('SELECT * FROM fee_vouchers WHERE id = ?').get(voucher_id);
     if (!voucher) {
       return res.status(404).json({ success: false, message: 'Voucher not found.' });
     }
 
-    const paymentCount = db.prepare('SELECT COUNT(*) as c FROM fee_payments').get();
+    const paymentCount = await db.prepare('SELECT COUNT(*) as c FROM fee_payments').get();
     const receiptNumber = `RMS-REC-${Date.now()}-${String(paymentCount.c + 1).padStart(3, '0')}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO fee_payments (voucher_id, amount, payment_method, transaction_id, received_by, receipt_number, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(voucher_id, amount, payment_method || 'cash', transaction_id, req.user.id, receiptNumber, notes);
 
-    const totalPaid = db.prepare('SELECT SUM(amount) as total FROM fee_payments WHERE voucher_id = ?').get(voucher_id);
+    const totalPaid = await db.prepare('SELECT SUM(amount) as total FROM fee_payments WHERE voucher_id = ?').get(voucher_id);
     const paidAmount = totalPaid.total || 0;
 
     let newStatus = 'pending';
     if (paidAmount >= voucher.total_amount) newStatus = 'paid';
     else if (paidAmount > 0) newStatus = 'partial';
 
-    db.prepare('UPDATE fee_vouchers SET status = ? WHERE id = ?').run(newStatus, voucher_id);
+    await db.prepare('UPDATE fee_vouchers SET status = ? WHERE id = ?').run(newStatus, voucher_id);
 
     res.json({
       success: true,
@@ -160,9 +177,9 @@ router.post('/payments', authenticate, authorize('super_admin', 'campus_admin', 
   }
 });
 
-router.get('/reports', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), (req, res) => {
+router.get('/reports', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), async (req, res) => {
   try {
-    const db = getDb();
+    const pool = getPool();
     const { month, year } = req.query;
     const targetMonth = month || new Date().getMonth() + 1;
     const targetYear = year || new Date().getFullYear();
@@ -178,19 +195,20 @@ router.get('/reports', authenticate, authorize('super_admin', 'campus_admin', 't
       FROM fee_vouchers fv
       JOIN students s ON fv.student_id = s.id
       JOIN campuses sc ON s.campus_id = sc.id
-      WHERE fv.month = ? AND fv.year = ?
+      WHERE fv.month = $1 AND fv.year = $2
     `;
     const params = [targetMonth, targetYear];
+    let paramIdx = 3;
 
     if (req.user.role !== 'super_admin') {
-      query += ' AND s.campus_id = ?';
+      query += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
-    query += ' GROUP BY s.campus_id';
-    const reports = db.prepare(query).all(...params);
+    query += ' GROUP BY s.campus_id, sc.name';
+    const result = await pool.query(query, params);
 
-    res.json({ success: true, data: reports, month: targetMonth, year: targetYear });
+    res.json({ success: true, data: result.rows, month: targetMonth, year: targetYear });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

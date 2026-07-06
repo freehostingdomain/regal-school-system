@@ -1,46 +1,60 @@
 const express = require('express');
-const { getDb } = require('../database');
+const { getDb, getPool } = require('../database');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
-    const db = getDb();
+    const pool = getPool();
     const today = new Date().toISOString().split('T')[0];
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
 
     let campusFilter = '';
+    let paramIdx = 1;
     const params = [];
 
     if (req.user.role !== 'super_admin') {
-      campusFilter = ' AND s.campus_id = ?';
+      campusFilter = ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
-    const totalStudents = db.prepare(`SELECT COUNT(*) as count FROM students s WHERE s.is_active = 1${campusFilter}`).get(...params).count;
-    const totalClasses = db.prepare(`SELECT COUNT(*) as count FROM classes c WHERE c.is_active = 1${req.user.role !== 'super_admin' ? ' AND c.campus_id = ?' : ''}`).get(...(req.user.role !== 'super_admin' ? [req.user.campus_id] : [])).count;
-    const totalTeachers = db.prepare(`SELECT COUNT(*) as count FROM users u WHERE u.role = 'teacher' AND u.is_active = 1${req.user.role !== 'super_admin' ? ' AND u.campus_id = ?' : ''}`).get(...(req.user.role !== 'super_admin' ? [req.user.campus_id] : [])).count;
+    const totalStudents = (await pool.query(
+      `SELECT COUNT(*) as count FROM students s WHERE s.is_active = 1${campusFilter}`, params
+    )).rows[0].count;
 
-    let attendanceFilter = campusFilter.replace('s.campus_id', 's.campus_id');
-    const todayAttendance = db.prepare(`
+    const campusParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
+    const campusFilterAlt = req.user.role !== 'super_admin' ? ` AND c.campus_id = $1` : '';
+
+    const totalClasses = (await pool.query(
+      `SELECT COUNT(*) as count FROM classes c WHERE c.is_active = 1${campusFilterAlt}`, campusParams
+    )).rows[0].count;
+
+    const teacherFilterAlt = req.user.role !== 'super_admin' ? ` AND u.campus_id = $1` : '';
+    const totalTeachers = (await pool.query(
+      `SELECT COUNT(*) as count FROM users u WHERE u.role = 'teacher' AND u.is_active = 1${teacherFilterAlt}`, campusParams
+    )).rows[0].count;
+
+    const attendanceParams = [today, ...(req.user.role !== 'super_admin' ? [req.user.campus_id] : [])];
+    const attendanceFilterAlt = req.user.role !== 'super_admin' ? ` AND s.campus_id = $2` : '';
+    const todayAttendance = (await pool.query(`
       SELECT a.status, COUNT(*) as count
       FROM attendance a
       JOIN students s ON a.student_id = s.id
-      WHERE a.date = ?${attendanceFilter}
+      WHERE a.date = $1${attendanceFilterAlt}
       GROUP BY a.status
-    `).all(today, ...(req.user.role !== 'super_admin' ? [req.user.campus_id] : []));
+    `, attendanceParams)).rows;
 
     const attendanceSummary = { present: 0, late: 0, absent: 0, total: 0 };
     todayAttendance.forEach(a => {
-      if (a.status === 'present' || a.status === 'late') attendanceSummary.present += a.count;
-      if (a.status === 'late') attendanceSummary.late = a.count;
-      if (a.status === 'absent') attendanceSummary.absent = a.count;
-      attendanceSummary.total += a.count;
+      if (a.status === 'present' || a.status === 'late') attendanceSummary.present += parseInt(a.count);
+      if (a.status === 'late') attendanceSummary.late = parseInt(a.count);
+      if (a.status === 'absent') attendanceSummary.absent = parseInt(a.count);
+      attendanceSummary.total += parseInt(a.count);
     });
 
-    const feeSummary = db.prepare(`
+    const feeSummary = (await pool.query(`
       SELECT
         COUNT(*) as total,
         SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as paid,
@@ -48,41 +62,48 @@ router.get('/', authenticate, (req, res) => {
         COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
         COUNT(CASE WHEN status != 'paid' THEN 1 END) as pending_count
       FROM fee_vouchers
-      WHERE month = ? AND year = ?
-    `).get(currentMonth, currentYear);
+      WHERE month = $1 AND year = $2
+    `, [currentMonth, currentYear])).rows[0];
 
-    const recentStudents = db.prepare(`
+    const recentStudentsParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
+    const recentStudentsFilter = req.user.role !== 'super_admin' ? ` AND s.campus_id = $1` : '';
+    const recentStudents = (await pool.query(`
       SELECT s.id, s.student_id, s.first_name, s.last_name, s.father_name, s.admission_date,
              c.name as class_name, sc.name as campus_name
       FROM students s
       LEFT JOIN classes c ON s.class_id = c.id
       LEFT JOIN campuses sc ON s.campus_id = sc.id
-      WHERE s.is_active = 1${campusFilter}
+      WHERE s.is_active = 1${recentStudentsFilter}
       ORDER BY s.created_at DESC LIMIT 5
-    `).all(...(req.user.role !== 'super_admin' ? [req.user.campus_id] : []));
+    `, recentStudentsParams)).rows;
 
-    const announcements = db.prepare(`
+    const announcementParams = req.user.role !== 'super_admin' ? [req.user.campus_id] : [];
+    const announcementFilter = req.user.role !== 'super_admin' ? ` AND (a.campus_id IS NULL OR a.campus_id = $1)` : '';
+    const announcements = (await pool.query(`
       SELECT * FROM announcements
-      WHERE is_active = 1 AND (campus_id IS NULL${req.user.role !== 'super_admin' ? ' OR campus_id = ?' : ''})
+      WHERE is_active = 1${announcementFilter}
       ORDER BY created_at DESC LIMIT 5
-    `).all(...(req.user.role !== 'super_admin' ? [req.user.campus_id] : []));
+    `, announcementParams)).rows;
 
-    const monthlyAttendance = db.prepare(`
-      SELECT strftime('%Y-%m', date) as month,
+    const monthlyAttendance = (await pool.query(`
+      SELECT TO_CHAR(date::date, 'YYYY-MM') as month,
              SUM(CASE WHEN status IN ('present', 'late') THEN 1 ELSE 0 END) as present_count,
              COUNT(*) as total
       FROM attendance
-      WHERE date >= date('now', '-6 months')
-      GROUP BY month
+      WHERE date >= (CURRENT_DATE - INTERVAL '6 months')::text
+      GROUP BY TO_CHAR(date::date, 'YYYY-MM')
       ORDER BY month ASC
-    `).all();
+    `)).rows;
 
-    const campusStats = req.user.role === 'super_admin' ? db.prepare(`
-      SELECT sc.name, sc.slug,
-             (SELECT COUNT(*) FROM students s WHERE s.campus_id = sc.id AND s.is_active = 1) as students,
-             (SELECT COUNT(*) FROM users u WHERE u.campus_id = sc.id AND u.role = 'teacher' AND u.is_active = 1) as teachers
-      FROM campuses sc WHERE sc.is_active = 1
-    `).all() : null;
+    let campusStats = null;
+    if (req.user.role === 'super_admin') {
+      campusStats = (await pool.query(`
+        SELECT sc.name, sc.slug,
+               (SELECT COUNT(*) FROM students s WHERE s.campus_id = sc.id AND s.is_active = 1) as students,
+               (SELECT COUNT(*) FROM users u WHERE u.campus_id = sc.id AND u.role = 'teacher' AND u.is_active = 1) as teachers
+        FROM campuses sc WHERE sc.is_active = 1
+      `)).rows;
+    }
 
     res.json({
       success: true,

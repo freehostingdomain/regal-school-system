@@ -5,7 +5,7 @@ const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDb();
     let query = `
@@ -16,14 +16,15 @@ router.get('/', authenticate, (req, res) => {
       WHERE a.is_active = 1
     `;
     const params = [];
+    let paramIdx = 1;
 
     if (req.user.role !== 'super_admin') {
-      query += ' AND (a.campus_id IS NULL OR a.campus_id = ?)';
+      query += ` AND (a.campus_id IS NULL OR a.campus_id = $${paramIdx++})`;
       params.push(req.user.campus_id);
     }
 
     query += ' ORDER BY a.created_at DESC';
-    const announcements = db.prepare(query).all(...params);
+    const announcements = await db.prepare(query).all(...params);
 
     res.json({ success: true, data: announcements });
   } catch (error) {
@@ -31,7 +32,7 @@ router.get('/', authenticate, (req, res) => {
   }
 });
 
-router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Announcement'), (req, res) => {
+router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Announcement'), async (req, res) => {
   try {
     const db = getDb();
     const { title, content, type, target_role, campus_id } = req.body;
@@ -42,22 +43,22 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
 
     const targetCampus = req.user.role === 'super_admin' ? (campus_id || null) : req.user.campus_id;
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO announcements (campus_id, title, content, type, target_role, created_by)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(targetCampus, title, content, type || 'general', target_role || 'all', req.user.id);
 
-    const announcement = db.prepare('SELECT * FROM announcements WHERE id = ?').get(result.lastInsertRowid);
+    const announcement = await db.prepare('SELECT * FROM announcements WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, message: 'Announcement created.', data: announcement });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Announcement'), (req, res) => {
+router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Announcement'), async (req, res) => {
   try {
     const db = getDb();
-    db.prepare('UPDATE announcements SET is_active = 0 WHERE id = ?').run(req.params.id);
+    await db.prepare('UPDATE announcements SET is_active = 0 WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Announcement deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

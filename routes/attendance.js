@@ -1,11 +1,11 @@
 const express = require('express');
-const { getDb } = require('../database');
+const { getDb, getPool } = require('../database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDb();
     const { date, class_id, section_id } = req.query;
@@ -18,26 +18,28 @@ router.get('/', authenticate, (req, res) => {
       JOIN students s ON a.student_id = s.id
       LEFT JOIN classes c ON s.class_id = c.id
       LEFT JOIN sections sec ON s.section_id = sec.id
-      WHERE a.date = ?
+      WHERE a.date = $1
     `;
     const params = [targetDate];
+    let paramIdx = 2;
 
     if (req.user.role !== 'super_admin') {
-      query += ' AND s.campus_id = ?';
+      query += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
     if (class_id) {
-      query += ' AND s.class_id = ?';
+      query += ` AND s.class_id = $${paramIdx++}`;
       params.push(class_id);
     }
     if (section_id) {
-      query += ' AND s.section_id = ?';
+      query += ` AND s.section_id = $${paramIdx++}`;
       params.push(section_id);
     }
 
     query += ' ORDER BY s.student_id ASC';
-    const attendance = db.prepare(query).all(...params);
+    const result = await getPool().query(query, params);
+    const attendance = result.rows;
 
     const summary = {
       total: attendance.length,
@@ -54,7 +56,7 @@ router.get('/', authenticate, (req, res) => {
   }
 });
 
-router.get('/today', authenticate, (req, res) => {
+router.get('/today', authenticate, async (req, res) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().split('T')[0];
@@ -66,28 +68,28 @@ router.get('/today', authenticate, (req, res) => {
       FROM students s
       LEFT JOIN classes c ON s.class_id = c.id
       LEFT JOIN sections sec ON s.section_id = sec.id
-      LEFT JOIN attendance a ON a.student_id = s.id AND a.date = ?
+      LEFT JOIN attendance a ON a.student_id = s.id AND a.date = $1
       WHERE s.is_active = 1
     `;
     const params = [today];
+    let paramIdx = 2;
 
     if (req.user.role !== 'super_admin') {
-      studentQuery += ' AND s.campus_id = ?';
+      studentQuery += ` AND s.campus_id = $${paramIdx++}`;
       params.push(req.user.campus_id);
     }
 
     studentQuery += ' ORDER BY s.student_id ASC';
-    const students = db.prepare(studentQuery).all(...params);
+    const result = await getPool().query(studentQuery, params);
 
-    res.json({ success: true, data: students, date: today });
+    res.json({ success: true, data: result.rows, date: today });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), activityLogger('Attendance'), (req, res) => {
+router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), activityLogger('Attendance'), async (req, res) => {
   try {
-    const db = getDb();
     const { records, date } = req.body;
     const targetDate = date || new Date().toISOString().split('T')[0];
 
@@ -101,32 +103,38 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
     const currentTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     const isLate = hours > 8 || (hours === 8 && minutes > 0);
 
-    const insertAttendance = db.prepare(`
-      INSERT INTO attendance (student_id, date, status, check_in_time, marked_by)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(student_id, date) DO UPDATE SET
-        status = excluded.status,
-        check_in_time = excluded.check_in_time,
-        marked_by = excluded.marked_by
-    `);
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
 
-    const insertMany = db.transaction((recs) => {
-      for (const record of recs) {
+      for (const record of records) {
         let status = record.status;
         if (status === 'present' && isLate) {
           status = 'late';
         }
-        insertAttendance.run(
+        await client.query(`
+          INSERT INTO attendance (student_id, date, status, check_in_time, marked_by)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (student_id, date) DO UPDATE SET
+            status = EXCLUDED.status,
+            check_in_time = EXCLUDED.check_in_time,
+            marked_by = EXCLUDED.marked_by
+        `, [
           record.student_id,
           targetDate,
           status,
           status !== 'absent' ? currentTime : null,
           req.user.id
-        );
+        ]);
       }
-    });
 
-    insertMany(records);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     res.json({ success: true, message: `Attendance marked for ${records.length} students.` });
   } catch (error) {
@@ -134,18 +142,19 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
   }
 });
 
-router.get('/student/:studentId', authenticate, (req, res) => {
+router.get('/student/:studentId', authenticate, async (req, res) => {
   try {
-    const db = getDb();
     const { month, year } = req.query;
     const targetMonth = month || new Date().getMonth() + 1;
     const targetYear = year || new Date().getFullYear();
 
-    const attendance = db.prepare(`
+    const result = await getPool().query(`
       SELECT * FROM attendance
-      WHERE student_id = ? AND strftime('%m', date) = ? AND strftime('%Y', date) = ?
+      WHERE student_id = $1 AND TO_CHAR(date::date, 'MM') = $2 AND TO_CHAR(date::date, 'YYYY') = $3
       ORDER BY date ASC
-    `).all(req.params.studentId, String(targetMonth).padStart(2, '0'), String(targetYear));
+    `, [req.params.studentId, String(targetMonth).padStart(2, '0'), String(targetYear)]);
+
+    const attendance = result.rows;
 
     const summary = {
       total_days: attendance.length,

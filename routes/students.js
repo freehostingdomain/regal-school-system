@@ -5,7 +5,7 @@ const { activityLogger } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDb();
     const { campus_id, class_id, search, page = 1, limit = 20 } = req.query;
@@ -33,9 +33,9 @@ router.get('/', authenticate, (req, res) => {
       params.push(term, term, term, term);
     }
 
-    const countResult = db.prepare(`SELECT COUNT(*) as total FROM students s ${where}`).get(...params);
-    
-    const students = db.prepare(`
+    const countResult = await db.prepare(`SELECT COUNT(*) as total FROM students s ${where}`).get(...params);
+
+    const students = await db.prepare(`
       SELECT s.*, c.name as class_name, sec.name as section_name, sc.name as campus_name,
              p.name as parent_name, p.phone_primary as parent_phone
       FROM students s
@@ -63,10 +63,10 @@ router.get('/', authenticate, (req, res) => {
   }
 });
 
-router.get('/:id', authenticate, (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const db = getDb();
-    const student = db.prepare(`
+    const student = await db.prepare(`
       SELECT s.*, c.name as class_name, sec.name as section_name, sc.name as campus_name,
              p.name as parent_name, p.phone_primary as parent_phone, p.email as parent_email,
              p.occupation as parent_occupation
@@ -82,15 +82,15 @@ router.get('/:id', authenticate, (req, res) => {
       return res.status(404).json({ success: false, message: 'Student not found.' });
     }
 
-    const attendance = db.prepare(`
+    const attendance = await db.prepare(`
       SELECT * FROM attendance WHERE student_id = ? ORDER BY date DESC LIMIT 30
     `).all(req.params.id);
 
-    const feeVouchers = db.prepare(`
+    const feeVouchers = await db.prepare(`
       SELECT * FROM fee_vouchers WHERE student_id = ? ORDER BY year DESC, month DESC LIMIT 12
     `).all(req.params.id);
 
-    const results = db.prepare(`
+    const results = await db.prepare(`
       SELECT r.*, e.name as exam_name, sub.name as subject_name
       FROM results r
       JOIN exams e ON r.exam_id = e.id
@@ -108,7 +108,7 @@ router.get('/:id', authenticate, (req, res) => {
   }
 });
 
-router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), (req, res) => {
+router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), async (req, res) => {
   try {
     const db = getDb();
     const {
@@ -122,7 +122,7 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
       return res.status(400).json({ success: false, message: 'First name, last name, father name, and admission date are required.' });
     }
 
-    const studentCount = db.prepare('SELECT COUNT(*) as count FROM students').get();
+    const studentCount = await db.prepare('SELECT COUNT(*) as count FROM students').get();
     const year = new Date().getFullYear();
     const studentId = `RMS-${year}-${String(studentCount.count + 1).padStart(3, '0')}`;
 
@@ -138,7 +138,7 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
     const finalSectionId = section_id && section_id !== '' ? section_id : null;
     const finalParentId = parent_id && parent_id !== '' ? parent_id : null;
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO students (student_id, campus_id, first_name, last_name, father_name,
         father_cnic, b_form_number, date_of_birth, gender, blood_group, address, city,
         emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
@@ -153,14 +153,14 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
       previous_school || null
     );
 
-    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(result.lastInsertRowid);
+    const student = await db.prepare('SELECT * FROM students WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, message: 'Student created successfully.', data: student });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.put('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), (req, res) => {
+router.put('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), async (req, res) => {
   try {
     const db = getDb();
     const {
@@ -170,7 +170,7 @@ router.put('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teach
       medical_conditions, class_id, section_id, parent_id, is_active
     } = req.body;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE students SET
         first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name),
         father_name = COALESCE(?, father_name), father_cnic = COALESCE(?, father_cnic),
@@ -191,17 +191,17 @@ router.put('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teach
       medical_conditions, class_id, section_id, parent_id, is_active, req.params.id
     );
 
-    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+    const student = await db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
     res.json({ success: true, message: 'Student updated successfully.', data: student });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), (req, res) => {
+router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin', 'teacher', 'accountant'), activityLogger('Student'), async (req, res) => {
   try {
     const db = getDb();
-    db.prepare('UPDATE students SET is_active = 0 WHERE id = ?').run(req.params.id);
+    await db.prepare('UPDATE students SET is_active = 0 WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Student deactivated successfully.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

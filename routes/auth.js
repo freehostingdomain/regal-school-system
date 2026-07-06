@@ -6,7 +6,7 @@ const { JWT_SECRET, authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -14,7 +14,7 @@ router.post('/login', (req, res) => {
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
@@ -33,7 +33,10 @@ router.post('/login', (req, res) => {
       { expiresIn: '24h' }
     );
 
-    const campus = user.campus_id ? db.prepare('SELECT name FROM campuses WHERE id = ?').get(user.campus_id) : null;
+    let campus = null;
+    if (user.campus_id) {
+      campus = await db.prepare('SELECT name FROM campuses WHERE id = ?').get(user.campus_id);
+    }
 
     res.json({
       success: true,
@@ -55,9 +58,12 @@ router.post('/login', (req, res) => {
   }
 });
 
-router.get('/me', authenticate, (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
   const db = getDb();
-  const campus = req.user.campus_id ? db.prepare('SELECT name FROM campuses WHERE id = ?').get(req.user.campus_id) : null;
+  let campus = null;
+  if (req.user.campus_id) {
+    campus = await db.prepare('SELECT name FROM campuses WHERE id = ?').get(req.user.campus_id);
+  }
   res.json({
     success: true,
     data: {
@@ -67,21 +73,21 @@ router.get('/me', authenticate, (req, res) => {
   });
 });
 
-router.put('/profile', authenticate, (req, res) => {
+router.put('/profile', authenticate, async (req, res) => {
   try {
     const { name, phone, current_password, new_password } = req.body;
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
     if (current_password && new_password) {
       if (!bcrypt.compareSync(current_password, user.password)) {
         return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
       }
       const hashedPassword = bcrypt.hashSync(new_password, 10);
-      db.prepare('UPDATE users SET password = ?, name = COALESCE(?, name), phone = COALESCE(?, phone) WHERE id = ?')
+      await db.prepare('UPDATE users SET password = ?, name = COALESCE(?, name), phone = COALESCE(?, phone) WHERE id = ?')
         .run(hashedPassword, name || null, phone || null, req.user.id);
     } else {
-      db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone) WHERE id = ?')
+      await db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone) WHERE id = ?')
         .run(name || null, phone || null, req.user.id);
     }
 

@@ -3,7 +3,7 @@ const { getDb } = require('../database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'regal_school_secret_key_2026';
 
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, message: 'Access denied. No token provided.' });
@@ -13,12 +13,12 @@ function authenticate(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const db = getDb();
-    const user = db.prepare('SELECT id, name, email, role, campus_id, is_active FROM users WHERE id = ?').get(decoded.userId);
-    
+    const user = await db.prepare('SELECT id, name, email, role, campus_id, is_active FROM users WHERE id = ?').get(decoded.userId);
+
     if (!user || !user.is_active) {
       return res.status(401).json({ success: false, message: 'Invalid token or user inactive.' });
     }
-    
+
     req.user = user;
     next();
   } catch (error) {
@@ -40,7 +40,7 @@ function authorize(...roles) {
 
 function campusAccess(req, res, next) {
   if (req.user.role === 'super_admin') return next();
-  
+
   const campusId = req.params.campusId || req.body.campus_id;
   if (campusId && req.user.campus_id !== campusId) {
     return res.status(403).json({ success: false, message: 'Access denied to this campus.' });
