@@ -154,6 +154,23 @@ router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher
     );
 
     const student = await db.prepare('SELECT * FROM students WHERE id = ?').get(result.lastInsertRowid);
+
+    try {
+      const classInfo = await db.prepare('SELECT admission_fee, monthly_fee, name as class_name FROM classes WHERE id = ?').get(finalClassId);
+      if (classInfo && classInfo.admission_fee > 0) {
+        const commissionAmount = Math.round(classInfo.admission_fee * 0.15 * 100) / 100;
+        await db.prepare(`
+          INSERT INTO owner_commissions (student_id, campus_id, student_name, student_code, class_name, admission_fee, monthly_fee, commission_rate, commission_amount)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 15, ?)
+        `).run(
+          result.lastInsertRowid, targetCampus, `${first_name} ${last_name}`,
+          studentId, classInfo.class_name, classInfo.admission_fee, classInfo.monthly_fee || 0, commissionAmount
+        );
+      }
+    } catch (commErr) {
+      console.error('Commission creation error:', commErr.message);
+    }
+
     res.status(201).json({ success: true, message: 'Student created successfully.', data: student });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

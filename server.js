@@ -14,6 +14,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const announcementRoutes = require('./routes/announcements');
 const notificationRoutes = require('./routes/notifications');
 const teacherRoutes = require('./routes/teachers');
+const commissionRoutes = require('./routes/commissions');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,6 +35,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/teachers', teacherRoutes);
+app.use('/api/commissions', commissionRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

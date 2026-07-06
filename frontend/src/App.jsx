@@ -1365,6 +1365,155 @@ function AttendancePage() {
   )
 }
 
+function CommissionsTab() {
+  const [commissions, setCommissions] = useState([])
+  const [summary, setSummary] = useState({})
+  const [campusSummary, setCampusSummary] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState({ status: '', campus_id: '' })
+  const [message, setMessage] = useState('')
+
+  const loadCommissions = () => {
+    setLoading(true)
+    const params = {}
+    if (filter.status) params.status = filter.status
+    if (filter.campus_id) params.campus_id = filter.campus_id
+    api().get('/commissions', { params }).then(res => {
+      setCommissions(res.data.data)
+      setSummary(res.data.summary)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
+  const loadSummary = () => {
+    api().get('/commissions/summary').then(res => {
+      setCampusSummary(res.data.data.byCampus || [])
+    }).catch(() => {})
+  }
+
+  useEffect(() => { loadCommissions(); loadSummary() }, [filter])
+
+  const markPaid = (id) => {
+    api().put(`/commissions/${id}/pay`).then(() => {
+      setMessage('Commission marked as paid!')
+      loadCommissions(); loadSummary()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const markAllPaid = () => {
+    if (!confirm('Mark ALL pending commissions as paid?')) return
+    api().put('/commissions/pay-all').then(res => {
+      setMessage(res.data.message)
+      loadCommissions(); loadSummary()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  return (
+    <div className="space-y-4">
+      {message && <div className="px-4 py-3 rounded-lg text-sm bg-green-50 text-green-700">{message}</div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="card text-center">
+          <p className="text-2xl font-bold">{formatCurrency(summary.total_amount || 0)}</p>
+          <p className="text-sm text-gray-500">Total Commission (15%)</p>
+        </div>
+        <div className="card text-center bg-green-50">
+          <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.paid_amount || 0)}</p>
+          <p className="text-sm text-green-600">Paid ({summary.paid || 0})</p>
+        </div>
+        <div className="card text-center bg-amber-50">
+          <p className="text-2xl font-bold text-amber-600">{formatCurrency(summary.pending_amount || 0)}</p>
+          <p className="text-sm text-amber-600">Pending ({summary.pending || 0})</p>
+        </div>
+        <div className="card text-center bg-blue-50">
+          <p className="text-2xl font-bold text-blue-600">{summary.total || 0}</p>
+          <p className="text-sm text-blue-600">Total Students</p>
+        </div>
+      </div>
+
+      {campusSummary.length > 0 && (
+        <div className="card">
+          <h3 className="font-bold text-sm mb-3">By Campus</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {campusSummary.map(c => (
+              <div key={c.campus_id} className="bg-gray-50 rounded-lg p-3">
+                <p className="text-sm font-medium">{c.campus_name}</p>
+                <p className="text-xs text-gray-500">{c.total_students} students &middot; {formatCurrency(c.total_commission)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 items-center">
+        <select className="input-field w-auto text-sm" value={filter.status} onChange={e => setFilter({...filter, status: e.target.value})}>
+          <option value="">All Status</option>
+          <option value="pending">Pending</option>
+          <option value="paid">Paid</option>
+        </select>
+        <select className="input-field w-auto text-sm" value={filter.campus_id} onChange={e => setFilter({...filter, campus_id: e.target.value})}>
+          <option value="">All Campuses</option>
+          <option value="1">Khanpur Road</option>
+          <option value="2">UET Campus</option>
+        </select>
+        {summary.pending > 0 && (
+          <button onClick={markAllPaid} className="btn-success text-sm">Mark All Paid</button>
+        )}
+      </div>
+
+      <div className="card overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="table-header">
+                <th className="px-4 py-3">Student</th>
+                <th className="px-4 py-3">Class</th>
+                <th className="px-4 py-3">Campus</th>
+                <th className="px-4 py-3 text-right">Admission Fee</th>
+                <th className="px-4 py-3 text-center">Rate</th>
+                <th className="px-4 py-3 text-right">Commission</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={8} className="text-center py-10 text-gray-500">Loading...</td></tr>
+              ) : commissions.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-10 text-gray-500">No commissions</td></tr>
+              ) : commissions.map(c => (
+                <tr key={c.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <p className="text-sm font-medium">{c.student_name}</p>
+                    <p className="text-xs text-gray-500">{c.student_code}</p>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{c.class_name}</td>
+                  <td className="px-4 py-3 text-xs"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full">{c.campus_name}</span></td>
+                  <td className="px-4 py-3 text-sm text-right">{formatCurrency(c.admission_fee)}</td>
+                  <td className="px-4 py-3 text-sm text-center">{c.commission_rate}%</td>
+                  <td className="px-4 py-3 text-sm text-right font-bold text-green-600">{formatCurrency(c.commission_amount)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${c.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {c.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {c.status === 'pending' && (
+                      <button onClick={() => markPaid(c.id)} className="btn-success text-xs py-1 px-3">Pay</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FinancePage() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('vouchers')
@@ -1465,7 +1614,7 @@ function FinancePage() {
       <h1 className="text-2xl font-bold">Finance Management</h1>
 
       <div className="flex gap-2 border-b">
-        {['vouchers', 'structures'].map(tab => (
+        {['vouchers', 'structures', 'commissions'].map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1663,6 +1812,8 @@ function FinancePage() {
           </div>
         </div>
       )}
+
+      {activeTab === 'commissions' && user?.role === 'super_admin' && <CommissionsTab />}
 
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

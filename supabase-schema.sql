@@ -461,3 +461,23 @@ INSERT INTO teacher_salaries (teacher_id, month, year, base_salary, bonus, deduc
 (5, 7, 2026, 42000, 0, 0, 42000, 'pending', NULL),
 (6, 6, 2026, 48000, 4000, 2000, 50000, 'paid', '2026-07-01'),
 (6, 7, 2026, 48000, 0, 0, 48000, 'pending', NULL);
+
+-- 23. Owner Commissions (auto-generated on student admission)
+CREATE TABLE IF NOT EXISTS owner_commissions (
+  id SERIAL PRIMARY KEY,
+  student_id INTEGER NOT NULL,
+  campus_id INTEGER NOT NULL,
+  student_name TEXT NOT NULL,
+  student_code TEXT,
+  class_name TEXT,
+  admission_fee REAL DEFAULT 0,
+  monthly_fee REAL DEFAULT 0,
+  commission_rate REAL DEFAULT 15,
+  commission_amount REAL NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK(status IN ('pending','paid','cancelled')),
+  paid_date DATE,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (campus_id) REFERENCES campuses(id)
+);
