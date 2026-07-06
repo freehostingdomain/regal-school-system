@@ -41,7 +41,7 @@ app.get('/api/health', (req, res) => {
 
 const frontendDist = path.join(__dirname, 'frontend', 'dist');
 app.use(express.static(frontendDist));
-app.get('/{*splat}', (req, res) => {
+app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API endpoint not found' });
   }
