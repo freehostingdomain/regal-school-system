@@ -68,7 +68,7 @@ function LoginPage() {
       const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
       const res = await axios.post(`${apiBase}/auth/login`, { email, password })
       login(res.data.data)
-      navigate('/dashboard')
+      navigate(res.data.data.user.role === 'parent' ? '/parent' : '/dashboard')
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed')
     } finally {
@@ -151,6 +151,7 @@ function Sidebar({ collapsed, setCollapsed }) {
     { icon: Bell, label: 'Announcements', path: '/announcements', roles: ['super_admin', 'campus_admin', 'teacher'] },
     { icon: Activity, label: 'Notifications', path: '/notifications', roles: ['super_admin', 'campus_admin', 'teacher', 'accountant'] },
     { icon: FileText, label: 'Exams', path: '/exams', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: Users, label: 'My Children', path: '/parent', roles: ['parent'] },
   ]
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role))
@@ -2810,6 +2811,261 @@ function NotificationsPage() {
   )
 }
 
+function ParentPortalPage() {
+  const { user } = useAuth()
+  const [children, setChildren] = useState([])
+  const [selectedChild, setSelectedChild] = useState(null)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [attendance, setAttendance] = useState(null)
+  const [fees, setFees] = useState([])
+  const [results, setResults] = useState([])
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api().get('/parent/children').then(res => {
+      setChildren(res.data)
+      if (res.data.length > 0) setSelectedChild(res.data[0])
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedChild) return
+    if (activeTab === 'attendance') {
+      const now = new Date()
+      api().get(`/parent/attendance/${selectedChild.id}?month=${now.getMonth() + 1}&year=${now.getFullYear()}`)
+        .then(res => setAttendance(res.data)).catch(() => {})
+    } else if (activeTab === 'fees') {
+      api().get(`/parent/fees/${selectedChild.id}`)
+        .then(res => setFees(res.data)).catch(() => {})
+    } else if (activeTab === 'results') {
+      api().get(`/parent/results/${selectedChild.id}`)
+        .then(res => setResults(res.data)).catch(() => {})
+    } else if (activeTab === 'profile') {
+      api().get('/parent/profile')
+        .then(res => setProfile(res.data)).catch(() => {})
+    }
+  }, [selectedChild, activeTab])
+
+  if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+
+  const tabs = [
+    { key: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { key: 'attendance', label: 'Attendance', icon: ClipboardCheck },
+    { key: 'fees', label: 'Fees', icon: DollarSign },
+    { key: 'results', label: 'Results', icon: BarChart3 },
+    { key: 'profile', label: 'Profile', icon: Users },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Parent Portal</h1>
+        {children.length > 1 && (
+          <select
+            value={selectedChild?.id || ''}
+            onChange={e => setSelectedChild(children.find(c => c.id === parseInt(e.target.value)))}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            {children.map(c => (
+              <option key={c.id} value={c.id}>{c.first_name} {c.last_name} ({c.student_id})</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {selectedChild && (
+        <>
+          <div className="bg-white rounded-xl p-4 shadow-sm border flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">
+              {selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}
+            </div>
+            <div>
+              <p className="font-semibold">{selectedChild.first_name} {selectedChild.last_name}</p>
+              <p className="text-sm text-gray-500">{selectedChild.class_name} - {selectedChild.section_name} | {selectedChild.campus_name}</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 border-b pb-2 overflow-x-auto">
+            {tabs.map(t => (
+              <button key={t.key} onClick={() => setActiveTab(t.key)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm whitespace-nowrap ${activeTab === t.key ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                <t.icon className="w-4 h-4" />{t.label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'overview' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl p-5 shadow-sm border">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><CheckCircle2 className="w-5 h-5 text-green-600" /></div>
+                  <p className="text-sm text-gray-500">Status</p>
+                </div>
+                <p className="text-2xl font-bold text-green-600">Active</p>
+                <p className="text-xs text-gray-400 mt-1">Admitted: {formatDate(selectedChild.admission_date)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-5 shadow-sm border">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><GraduationCap className="w-5 h-5 text-blue-600" /></div>
+                  <p className="text-sm text-gray-500">Class</p>
+                </div>
+                <p className="text-2xl font-bold">{selectedChild.class_name}</p>
+                <p className="text-xs text-gray-400 mt-1">Section: {selectedChild.section_name}</p>
+              </div>
+              <div className="bg-white rounded-xl p-5 shadow-sm border">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center"><School className="w-5 h-5 text-purple-600" /></div>
+                  <p className="text-sm text-gray-500">Campus</p>
+                </div>
+                <p className="text-lg font-bold">{selectedChild.campus_name}</p>
+                <p className="text-xs text-gray-400 mt-1">Student Code: {selectedChild.student_id}</p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'attendance' && attendance && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+                  <p className="text-2xl font-bold">{attendance.summary.total}</p>
+                  <p className="text-xs text-gray-500">Total Days</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+                  <p className="text-2xl font-bold text-green-600">{attendance.summary.present}</p>
+                  <p className="text-xs text-gray-500">Present</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+                  <p className="text-2xl font-bold text-red-600">{attendance.summary.absent}</p>
+                  <p className="text-xs text-gray-500">Absent</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+                  <p className="text-2xl font-bold text-yellow-600">{attendance.summary.late}</p>
+                  <p className="text-xs text-gray-500">Late</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+                  <p className="text-2xl font-bold text-blue-600">{attendance.summary.percentage}%</p>
+                  <p className="text-xs text-gray-500">Attendance</p>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50"><tr>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Class</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {attendance.attendance.map(a => (
+                      <tr key={a.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">{formatDate(a.date)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            a.status === 'present' ? 'bg-green-100 text-green-700' :
+                            a.status === 'absent' ? 'bg-red-100 text-red-700' :
+                            a.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>{a.status}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500">{a.class_name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'fees' && (
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50"><tr>
+                  <th className="px-4 py-3 text-left">Month</th>
+                  <th className="px-4 py-3 text-left">Class</th>
+                  <th className="px-4 py-3 text-left">Amount</th>
+                  <th className="px-4 py-3 text-left">Paid</th>
+                  <th className="px-4 py-3 text-left">Balance</th>
+                  <th className="px-4 py-3 text-left">Due Date</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {fees.length === 0 ? (
+                    <tr><td colSpan={7} className="text-center py-10 text-gray-500">No fee records</td></tr>
+                  ) : fees.map(f => (
+                    <tr key={f.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium">{f.month} {f.year}</td>
+                      <td className="px-4 py-3 text-gray-500">{f.class_name}</td>
+                      <td className="px-4 py-3">{formatCurrency(f.amount)}</td>
+                      <td className="px-4 py-3 text-green-600">{formatCurrency(f.total_paid)}</td>
+                      <td className="px-4 py-3 text-red-600">{formatCurrency(f.balance)}</td>
+                      <td className="px-4 py-3 text-gray-500">{formatDate(f.due_date)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${f.balance <= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {f.balance <= 0 ? 'Paid' : 'Unpaid'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === 'results' && (
+            <div className="space-y-4">
+              {results.length === 0 ? (
+                <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No exam results yet</div>
+              ) : results.map(exam => (
+                <div key={exam.exam_id} className="bg-white rounded-xl shadow-sm border p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-semibold text-lg">{exam.exam_name}</h3>
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                        exam.exam_type === 'final' ? 'bg-purple-100 text-purple-700' :
+                        exam.exam_type === 'midterm' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>{exam.exam_type}</span>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-500">Total</p>
+                      <p className="font-bold">{exam.obtained_marks} / {exam.total_marks}</p>
+                      <p className="text-xs text-gray-400">{((exam.obtained_marks / exam.total_marks) * 100).toFixed(1)}%</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {exam.subjects.map((sub, i) => (
+                      <div key={i} className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-500">{sub.subject}</p>
+                        <p className="font-semibold">{sub.marks}/{sub.total}</p>
+                        <span className={`text-xs font-medium ${sub.grade === 'A+' || sub.grade === 'A' ? 'text-green-600' : sub.grade === 'F' ? 'text-red-600' : 'text-yellow-600'}`}>{sub.grade}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'profile' && profile && (
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h3 className="font-semibold text-lg mb-4">Parent Information</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><p className="text-xs text-gray-500">Name</p><p className="font-medium">{profile.name}</p></div>
+                <div><p className="text-xs text-gray-500">Email</p><p className="font-medium">{profile.email}</p></div>
+                <div><p className="text-xs text-gray-500">Phone</p><p className="font-medium">{profile.phone_primary}</p></div>
+                <div><p className="text-xs text-gray-500">CNIC</p><p className="font-medium">{profile.cnic || '-'}</p></div>
+                <div><p className="text-xs text-gray-500">Address</p><p className="font-medium">{profile.address || '-'}</p></div>
+                <div><p className="text-xs text-gray-500">Occupation</p><p className="font-medium">{profile.occupation || '-'}</p></div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -2883,6 +3139,7 @@ function App() {
           <Route path="/announcements" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><AnnouncementsPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/exams" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ExamsPage /></ProtectedRoute>} />
+          <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><ParentPortalPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
       </CampusContext.Provider>
