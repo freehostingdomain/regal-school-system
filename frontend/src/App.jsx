@@ -130,6 +130,7 @@ function LoginPage() {
             <p><strong>Campus Admin:</strong> khanpur.admin@regal.school / admin123</p>
             <p><strong>Teacher:</strong> ahmed@regal.school / teacher123</p>
             <p><strong>Accountant:</strong> ali@regal.school / account123</p>
+            <p><strong>Parent:</strong> ali.khan@gmail.com / parent123</p>
           </div>
         </div>
       </div>
@@ -2406,7 +2407,8 @@ function ExamsPage() {
   useEffect(() => {
     loadExams()
     api().get('/classes').then(r => setClasses(r.data.data))
-    api().get('/classes/teachers').then(r => {}).catch(() => {})
+    const campusParam = selectedCampus ? `?campus_id=${selectedCampus}` : ''
+    api().get(`/exams/list/subjects${campusParam}`).then(r => setSubjects(r.data.data || [])).catch(() => {})
   }, [selectedCampus])
 
   const loadSubjects = (classId) => {
@@ -2463,6 +2465,18 @@ function ExamsPage() {
   const deleteExam = (id) => {
     if (!confirm('Delete this exam?')) return
     api().delete(`/exams/${id}`).then(() => { setMessage('Exam deleted!'); loadExams(); setTimeout(() => setMessage(''), 3000) }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const toggleDatesheet = (id) => {
+    api().put(`/exams/${id}/toggle-datesheet`).then(res => {
+      setExams(exams.map(e => e.id === id ? { ...e, is_datesheet_live: res.data.is_live ? 1 : 0 } : e))
+    }).catch(err => alert('Error'))
+  }
+
+  const toggleResults = (id) => {
+    api().put(`/exams/${id}/toggle-results`).then(res => {
+      setExams(exams.map(e => e.id === id ? { ...e, is_results_live: res.data.is_live ? 1 : 0 } : e))
+    }).catch(err => alert('Error'))
   }
 
   const toggleSubject = (sub) => {
@@ -2623,6 +2637,21 @@ function ExamsPage() {
                 <input type="date" className="input-field" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} />
               </div>
             </div>
+            <div>
+              <label className="label">Select Subjects *</label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {subjects.length === 0 && <p className="text-sm text-gray-400">No subjects available for this campus</p>}
+                {subjects.map(sub => (
+                  <button key={sub.id} type="button" onClick={() => toggleSubject(sub)}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      selectedSubjects.find(s => s.id === sub.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
+                    }`}>
+                    {sub.name}
+                  </button>
+                ))}
+              </div>
+              {selectedSubjects.length > 0 && <p className="text-xs text-gray-500 mt-1">{selectedSubjects.length} subject(s) selected</p>}
+            </div>
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
               <button type="submit" className="btn-primary">Create Exam</button>
@@ -2655,6 +2684,16 @@ function ExamsPage() {
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => openMarksEntry(e)} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg">Marks</button>
                       <button onClick={() => openReport(e)} className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg">Report</button>
+                      {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
+                        <>
+                          <button onClick={() => toggleDatesheet(e.id)} className={`px-2 py-1 text-xs font-medium rounded-lg ${e.is_datesheet_live ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`} title="Toggle Datesheet Live">
+                            {e.is_datesheet_live ? 'Live' : 'Off'} Sheet
+                          </button>
+                          <button onClick={() => toggleResults(e.id)} className={`px-2 py-1 text-xs font-medium rounded-lg ${e.is_results_live ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`} title="Toggle Results Live">
+                            {e.is_results_live ? 'Live' : 'Off'} Result
+                          </button>
+                        </>
+                      )}
                       {['super_admin', 'campus_admin'].includes(user?.role) && (
                         <button onClick={() => deleteExam(e.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -2829,7 +2868,10 @@ function ParentPortalPage() {
   const { user } = useAuth()
   const [children, setChildren] = useState([])
   const [selectedChild, setSelectedChild] = useState(null)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('announcements')
+  const [announcements, setAnnouncements] = useState([])
+  const [datesheets, setDatesheets] = useState([])
+  const [liveResults, setLiveResults] = useState([])
   const [attendance, setAttendance] = useState(null)
   const [fees, setFees] = useState([])
   const [results, setResults] = useState([])
@@ -2837,15 +2879,23 @@ function ParentPortalPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api().get('/parent/children').then(res => {
-      setChildren(res.data)
-      if (res.data.length > 0) setSelectedChild(res.data[0])
+    Promise.all([
+      api().get('/parent/children').catch(() => ({ data: [] })),
+      api().get('/announcements').catch(() => ({ data: { data: [] } })),
+      api().get('/exams/live/datesheets').catch(() => ({ data: { data: [] } })),
+      api().get('/exams/live/results').catch(() => ({ data: { data: [] } })),
+    ]).then(([childRes, annRes, dsRes, resRes]) => {
+      setChildren(childRes.data || [])
+      if (childRes.data?.length > 0) setSelectedChild(childRes.data[0])
+      setAnnouncements(annRes.data?.data || [])
+      setDatesheets(dsRes.data?.data || [])
+      setLiveResults(resRes.data?.data || [])
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    if (!selectedChild) return
+    if (!selectedChild || activeTab === 'announcements' || activeTab === 'datesheets' || activeTab === 'results') return
     if (activeTab === 'attendance') {
       const now = new Date()
       api().get(`/parent/attendance/${selectedChild.id}?month=${now.getMonth() + 1}&year=${now.getFullYear()}`)
@@ -2853,23 +2903,35 @@ function ParentPortalPage() {
     } else if (activeTab === 'fees') {
       api().get(`/parent/fees/${selectedChild.id}`)
         .then(res => setFees(res.data)).catch(() => {})
-    } else if (activeTab === 'results') {
+    } else if (activeTab === 'child-results') {
       api().get(`/parent/results/${selectedChild.id}`)
         .then(res => setResults(res.data)).catch(() => {})
-    } else if (activeTab === 'profile') {
+    } else if (activeTab === 'child-profile') {
       api().get('/parent/profile')
         .then(res => setProfile(res.data)).catch(() => {})
     }
   }, [selectedChild, activeTab])
 
+  const loadExamReport = (examId) => {
+    if (!selectedChild) return
+    api().get(`/exams/${examId}/report`).then(res => {
+      const studentReport = res.data.data?.reportData?.find(r => r.id === selectedChild.id)
+      if (studentReport) {
+        setResults([{ ...res.data.data.exam, report: studentReport, subjects: res.data.data.subjects }])
+        setActiveTab('child-results')
+      }
+    }).catch(() => {})
+  }
+
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
 
   const tabs = [
-    { key: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { key: 'announcements', label: 'Announcements', icon: Bell },
+    { key: 'datesheets', label: 'Exam Datesheets', icon: Calendar },
+    { key: 'results', label: 'Exam Results', icon: BarChart3 },
+    { key: 'child-profile', label: 'Child Profile', icon: Users },
     { key: 'attendance', label: 'Attendance', icon: ClipboardCheck },
     { key: 'fees', label: 'Fees', icon: DollarSign },
-    { key: 'results', label: 'Results', icon: BarChart3 },
-    { key: 'profile', label: 'Profile', icon: Users },
   ]
 
   return (
@@ -2889,192 +2951,239 @@ function ParentPortalPage() {
         )}
       </div>
 
-      {selectedChild && (
-        <>
-          <div className="bg-white rounded-xl p-4 shadow-sm border flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">
-              {selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}
+      <div className="flex gap-2 border-b pb-2 overflow-x-auto">
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm whitespace-nowrap ${activeTab === t.key ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <t.icon className="w-4 h-4" />{t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'announcements' && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">School Announcements</h2>
+          {announcements.length === 0 ? (
+            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No announcements</div>
+          ) : announcements.map(a => (
+            <div key={a.id} className="bg-white rounded-xl shadow-sm border p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  a.type === 'urgent' ? 'bg-red-100 text-red-700' :
+                  a.type === 'event' ? 'bg-green-100 text-green-700' :
+                  a.type === 'holiday' ? 'bg-purple-100 text-purple-700' :
+                  'bg-blue-100 text-blue-700'
+                }`}>{a.type || 'general'}</span>
+                <span className="text-xs text-gray-400">{formatDate(a.created_at)}</span>
+              </div>
+              <h3 className="font-semibold text-lg">{a.title}</h3>
+              <p className="text-sm text-gray-600 mt-1">{a.content}</p>
+              {a.campus_name && <p className="text-xs text-gray-400 mt-2">Campus: {a.campus_name}</p>}
             </div>
-            <div>
-              <p className="font-semibold">{selectedChild.first_name} {selectedChild.last_name}</p>
-              <p className="text-sm text-gray-500">{selectedChild.class_name} - {selectedChild.section_name} | {selectedChild.campus_name}</p>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'datesheets' && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Exam Datesheets (Live)</h2>
+          {datesheets.length === 0 ? (
+            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No live datesheets available</div>
+          ) : datesheets.map(exam => (
+            <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-5">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="font-semibold text-lg">{exam.name}</h3>
+                  <p className="text-sm text-gray-500">{exam.class_name} | {exam.campus_name}</p>
+                </div>
+                <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                  exam.type === 'final' ? 'bg-purple-100 text-purple-700' :
+                  exam.type === 'midterm' ? 'bg-blue-100 text-blue-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>{exam.type}</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Start Date</p><p className="font-medium">{formatDate(exam.start_date)}</p></div>
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">End Date</p><p className="font-medium">{formatDate(exam.end_date)}</p></div>
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Total Marks</p><p className="font-medium">{exam.total_marks}</p></div>
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Passing Marks</p><p className="font-medium">{exam.passing_marks}</p></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'results' && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Exam Results (Published)</h2>
+          {liveResults.length === 0 ? (
+            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No published results yet</div>
+          ) : liveResults.map(exam => (
+            <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-5">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="font-semibold text-lg">{exam.name}</h3>
+                  <p className="text-sm text-gray-500">{exam.class_name} | {exam.campus_name}</p>
+                </div>
+                <button onClick={() => loadExamReport(exam.id)} className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Report</button>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-3 text-sm">
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Start</p><p className="font-medium">{formatDate(exam.start_date)}</p></div>
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">End</p><p className="font-medium">{formatDate(exam.end_date)}</p></div>
+                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Total Marks</p><p className="font-medium">{exam.total_marks}</p></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'child-profile' && selectedChild && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl p-6 shadow-sm border">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-2xl">
+                {selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{selectedChild.first_name} {selectedChild.last_name}</h2>
+                <p className="text-sm text-gray-500">ID: {selectedChild.student_id}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="space-y-3">
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Father Name</span><span className="font-medium">{selectedChild.father_name}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Class</span><span className="font-medium">{selectedChild.class_name}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Section</span><span className="font-medium">{selectedChild.section_name || '-'}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Campus</span><span className="font-medium">{selectedChild.campus_name}</span></div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Gender</span><span className="font-medium capitalize">{selectedChild.gender || '-'}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Blood Group</span><span className="font-medium">{selectedChild.blood_group || '-'}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Date of Birth</span><span className="font-medium">{formatDate(selectedChild.date_of_birth)}</span></div>
+                <div className="flex justify-between py-2 border-b"><span className="text-gray-500">Admission Date</span><span className="font-medium">{formatDate(selectedChild.admission_date)}</span></div>
+              </div>
             </div>
           </div>
+        </div>
+      )}
 
-          <div className="flex gap-2 border-b pb-2 overflow-x-auto">
-            {tabs.map(t => (
-              <button key={t.key} onClick={() => setActiveTab(t.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm whitespace-nowrap ${activeTab === t.key ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                <t.icon className="w-4 h-4" />{t.label}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl p-5 shadow-sm border">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><CheckCircle2 className="w-5 h-5 text-green-600" /></div>
-                  <p className="text-sm text-gray-500">Status</p>
-                </div>
-                <p className="text-2xl font-bold text-green-600">Active</p>
-                <p className="text-xs text-gray-400 mt-1">Admitted: {formatDate(selectedChild.admission_date)}</p>
-              </div>
-              <div className="bg-white rounded-xl p-5 shadow-sm border">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><GraduationCap className="w-5 h-5 text-blue-600" /></div>
-                  <p className="text-sm text-gray-500">Class</p>
-                </div>
-                <p className="text-2xl font-bold">{selectedChild.class_name}</p>
-                <p className="text-xs text-gray-400 mt-1">Section: {selectedChild.section_name}</p>
-              </div>
-              <div className="bg-white rounded-xl p-5 shadow-sm border">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center"><School className="w-5 h-5 text-purple-600" /></div>
-                  <p className="text-sm text-gray-500">Campus</p>
-                </div>
-                <p className="text-lg font-bold">{selectedChild.campus_name}</p>
-                <p className="text-xs text-gray-400 mt-1">Student Code: {selectedChild.student_id}</p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'attendance' && attendance && (
-            <div className="space-y-4">
+      {activeTab === 'attendance' && selectedChild && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Attendance</h2>
+          {attendance ? (
+            <>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-                  <p className="text-2xl font-bold">{attendance.summary.total}</p>
-                  <p className="text-xs text-gray-500">Total Days</p>
-                </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-                  <p className="text-2xl font-bold text-green-600">{attendance.summary.present}</p>
-                  <p className="text-xs text-gray-500">Present</p>
-                </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-                  <p className="text-2xl font-bold text-red-600">{attendance.summary.absent}</p>
-                  <p className="text-xs text-gray-500">Absent</p>
-                </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-                  <p className="text-2xl font-bold text-yellow-600">{attendance.summary.late}</p>
-                  <p className="text-xs text-gray-500">Late</p>
-                </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-                  <p className="text-2xl font-bold text-blue-600">{attendance.summary.percentage}%</p>
-                  <p className="text-xs text-gray-500">Attendance</p>
-                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold">{attendance.summary.total}</p><p className="text-xs text-gray-500">Total Days</p></div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold text-green-600">{attendance.summary.present}</p><p className="text-xs text-gray-500">Present</p></div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold text-red-600">{attendance.summary.absent}</p><p className="text-xs text-gray-500">Absent</p></div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold text-yellow-600">{attendance.summary.late}</p><p className="text-xs text-gray-500">Late</p></div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold text-blue-600">{attendance.summary.percentage}%</p><p className="text-xs text-gray-500">Attendance</p></div>
               </div>
               <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50"><tr>
                     <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Day</th>
                     <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-left">Class</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-100">
-                    {attendance.attendance.map(a => (
-                      <tr key={a.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">{formatDate(a.date)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            a.status === 'present' ? 'bg-green-100 text-green-700' :
-                            a.status === 'absent' ? 'bg-red-100 text-red-700' :
-                            a.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-blue-100 text-blue-700'
-                          }`}>{a.status}</span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-500">{a.class_name}</td>
-                      </tr>
-                    ))}
+                    {attendance.attendance.length === 0 ? (
+                      <tr><td colSpan={3} className="text-center py-10 text-gray-500">No attendance records</td></tr>
+                    ) : attendance.attendance.map(a => {
+                      const d = new Date(a.date)
+                      const dayName = d.toLocaleDateString('en-PK', { weekday: 'long' })
+                      return (
+                        <tr key={a.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">{formatDate(a.date)}</td>
+                          <td className="px-4 py-3 text-gray-500">{dayName}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              a.status === 'present' ? 'bg-green-100 text-green-700' :
+                              a.status === 'absent' ? 'bg-red-100 text-red-700' :
+                              a.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>{a.status}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            </>
+          ) : <p className="text-gray-500">Loading attendance...</p>}
+        </div>
+      )}
 
-          {activeTab === 'fees' && (
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50"><tr>
-                  <th className="px-4 py-3 text-left">Month</th>
-                  <th className="px-4 py-3 text-left">Class</th>
-                  <th className="px-4 py-3 text-left">Amount</th>
-                  <th className="px-4 py-3 text-left">Paid</th>
-                  <th className="px-4 py-3 text-left">Balance</th>
-                  <th className="px-4 py-3 text-left">Due Date</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                </tr></thead>
-                <tbody className="divide-y divide-gray-100">
-                  {fees.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-10 text-gray-500">No fee records</td></tr>
-                  ) : fees.map(f => (
-                    <tr key={f.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{f.month} {f.year}</td>
-                      <td className="px-4 py-3 text-gray-500">{f.class_name}</td>
-                      <td className="px-4 py-3">{formatCurrency(f.amount)}</td>
-                      <td className="px-4 py-3 text-green-600">{formatCurrency(f.total_paid)}</td>
-                      <td className="px-4 py-3 text-red-600">{formatCurrency(f.balance)}</td>
-                      <td className="px-4 py-3 text-gray-500">{formatDate(f.due_date)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${f.balance <= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {f.balance <= 0 ? 'Paid' : 'Unpaid'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {activeTab === 'fees' && selectedChild && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Fees</h2>
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50"><tr>
+                <th className="px-4 py-3 text-left">Month</th>
+                <th className="px-4 py-3 text-left">Class</th>
+                <th className="px-4 py-3 text-left">Amount</th>
+                <th className="px-4 py-3 text-left">Paid</th>
+                <th className="px-4 py-3 text-left">Balance</th>
+                <th className="px-4 py-3 text-left">Due Date</th>
+                <th className="px-4 py-3 text-left">Status</th>
+              </tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {fees.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-10 text-gray-500">No fee records</td></tr>
+                ) : fees.map(f => (
+                  <tr key={f.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{f.month} {f.year}</td>
+                    <td className="px-4 py-3 text-gray-500">{f.class_name}</td>
+                    <td className="px-4 py-3">{formatCurrency(f.amount)}</td>
+                    <td className="px-4 py-3 text-green-600">{formatCurrency(f.total_paid)}</td>
+                    <td className="px-4 py-3 text-red-600">{formatCurrency(f.balance)}</td>
+                    <td className="px-4 py-3 text-gray-500">{formatDate(f.due_date)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${f.balance <= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {f.balance <= 0 ? 'Paid' : 'Unpaid'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-          {activeTab === 'results' && (
-            <div className="space-y-4">
-              {results.length === 0 ? (
-                <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No exam results yet</div>
-              ) : results.map(exam => (
-                <div key={exam.exam_id} className="bg-white rounded-xl shadow-sm border p-5">
+      {activeTab === 'child-results' && selectedChild && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Results</h2>
+          {results.length === 0 ? (
+            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No results available</div>
+          ) : results.map((exam, idx) => (
+            <div key={idx} className="bg-white rounded-xl shadow-sm border p-5">
+              {exam.report ? (
+                <>
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="font-semibold text-lg">{exam.exam_name}</h3>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        exam.exam_type === 'final' ? 'bg-purple-100 text-purple-700' :
-                        exam.exam_type === 'midterm' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>{exam.exam_type}</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-500">Total</p>
-                      <p className="font-bold">{exam.obtained_marks} / {exam.total_marks}</p>
-                      <p className="text-xs text-gray-400">{((exam.obtained_marks / exam.total_marks) * 100).toFixed(1)}%</p>
+                      <h3 className="font-semibold text-lg">{exam.name}</h3>
+                      <p className="text-sm text-gray-500">Position: #{exam.report.position} | {exam.report.percentage}% | {exam.report.overallGrade}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {exam.subjects.map((sub, i) => (
+                    {exam.report.subjects?.map((sub, i) => (
                       <div key={i} className="bg-gray-50 rounded-lg p-3">
-                        <p className="text-xs text-gray-500">{sub.subject}</p>
-                        <p className="font-semibold">{sub.marks}/{sub.total}</p>
+                        <p className="text-xs text-gray-500">{sub.subject_name}</p>
+                        <p className="font-semibold">{sub.marks_obtained}/{sub.max_marks}</p>
                         <span className={`text-xs font-medium ${sub.grade === 'A+' || sub.grade === 'A' ? 'text-green-600' : sub.grade === 'F' ? 'text-red-600' : 'text-yellow-600'}`}>{sub.grade}</span>
                       </div>
                     ))}
                   </div>
-                </div>
-              ))}
+                </>
+              ) : (
+                <p className="text-gray-500">Report data loading...</p>
+              )}
             </div>
-          )}
-
-          {activeTab === 'profile' && profile && (
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="font-semibold text-lg mb-4">Parent Information</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><p className="text-xs text-gray-500">Name</p><p className="font-medium">{profile.name}</p></div>
-                <div><p className="text-xs text-gray-500">Email</p><p className="font-medium">{profile.email}</p></div>
-                <div><p className="text-xs text-gray-500">Phone</p><p className="font-medium">{profile.phone_primary}</p></div>
-                <div><p className="text-xs text-gray-500">CNIC</p><p className="font-medium">{profile.cnic || '-'}</p></div>
-                <div><p className="text-xs text-gray-500">Address</p><p className="font-medium">{profile.address || '-'}</p></div>
-                <div><p className="text-xs text-gray-500">Occupation</p><p className="font-medium">{profile.occupation || '-'}</p></div>
-              </div>
-            </div>
-          )}
-        </>
+          ))}
+        </div>
       )}
     </div>
   )

@@ -40,6 +40,24 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+router.get('/list/subjects', authenticate, async (req, res) => {
+  try {
+    const pool = getPool();
+    const campusId = req.query.campus_id || req.user.campus_id;
+    let query = 'SELECT id, name, code, campus_id FROM subjects';
+    const params = [];
+    if (campusId) {
+      query += ' WHERE campus_id = $1';
+      params.push(campusId);
+    }
+    query += ' ORDER BY name';
+    const subjects = (await pool.query(query, params)).rows;
+    res.json({ success: true, data: subjects });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.post('/', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), activityLogger('Exam'), async (req, res) => {
   try {
     const pool = getPool();
@@ -99,6 +117,96 @@ router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin'), ac
     const pool = getPool();
     await pool.query('UPDATE exams SET is_active = 0 WHERE id = $1', [req.params.id]);
     res.json({ success: true, message: 'Exam deleted.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.put('/:id/toggle-datesheet', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.query(
+      'UPDATE exams SET is_datesheet_live = CASE WHEN is_datesheet_live = 1 THEN 0 ELSE 1 END WHERE id = $1 RETURNING is_datesheet_live',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, message: 'Exam not found.' });
+    res.json({ success: true, is_live: result.rows[0].is_datesheet_live === 1 });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.put('/:id/toggle-results', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.query(
+      'UPDATE exams SET is_results_live = CASE WHEN is_results_live = 1 THEN 0 ELSE 1 END WHERE id = $1 RETURNING is_results_live',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, message: 'Exam not found.' });
+    res.json({ success: true, is_live: result.rows[0].is_results_live === 1 });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Parent-facing: get live datesheets
+router.get('/live/datesheets', authenticate, async (req, res) => {
+  try {
+    const pool = getPool();
+    let query = `
+      SELECT e.*, c.name as class_name, sc.name as campus_name
+      FROM exams e
+      LEFT JOIN classes c ON e.class_id = c.id
+      LEFT JOIN campuses sc ON e.campus_id = sc.id
+      WHERE e.is_active = 1 AND e.is_datesheet_live = 1
+    `;
+    const params = [];
+    if (req.user.role === 'parent') {
+      const parentResult = await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id]);
+      if (parentResult.rows.length) {
+        const childResult = await pool.query('SELECT class_id FROM students WHERE parent_id = $1 AND is_active = 1', [parentResult.rows[0].id]);
+        const classIds = childResult.rows.map(r => r.class_id);
+        if (classIds.length) {
+          query += ` AND e.class_id = ANY($1)`;
+          params.push(classIds);
+        }
+      }
+    }
+    query += ' ORDER BY e.start_date ASC';
+    const exams = (await pool.query(query, params)).rows;
+    res.json({ success: true, data: exams });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Parent-facing: get live results
+router.get('/live/results', authenticate, async (req, res) => {
+  try {
+    const pool = getPool();
+    let query = `
+      SELECT e.*, c.name as class_name, sc.name as campus_name
+      FROM exams e
+      LEFT JOIN classes c ON e.class_id = c.id
+      LEFT JOIN campuses sc ON e.campus_id = sc.id
+      WHERE e.is_active = 1 AND e.is_results_live = 1
+    `;
+    const params = [];
+    if (req.user.role === 'parent') {
+      const parentResult = await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id]);
+      if (parentResult.rows.length) {
+        const childResult = await pool.query('SELECT class_id FROM students WHERE parent_id = $1 AND is_active = 1', [parentResult.rows[0].id]);
+        const classIds = childResult.rows.map(r => r.class_id);
+        if (classIds.length) {
+          query += ` AND e.class_id = ANY($1)`;
+          params.push(classIds);
+        }
+      }
+    }
+    query += ' ORDER BY e.start_date DESC';
+    const exams = (await pool.query(query, params)).rows;
+    res.json({ success: true, data: exams });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
