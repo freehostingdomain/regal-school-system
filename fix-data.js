@@ -1,13 +1,13 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const p = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+
 (async () => {
-  // Set accountant campus_id to NULL so they see all campuses
-  await p.query(`UPDATE users SET campus_id = NULL WHERE role = 'accountant'`);
-  console.log('Accountant campus_id set to NULL');
+  const result = await p.query('DELETE FROM owner_commissions');
+  console.log(`Deleted ${result.rowCount} old commission records`);
   
-  // Verify
-  const r = await p.query(`SELECT id,name,role,campus_id FROM users WHERE role = 'accountant'`);
-  console.log('Accountant:', JSON.stringify(r.rows));
+  const check = await p.query('SELECT COUNT(*) as count FROM owner_commissions');
+  console.log(`Remaining: ${check.rows[0].count}`);
+  
   await p.end();
 })();

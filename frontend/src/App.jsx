@@ -150,6 +150,7 @@ function Sidebar({ collapsed, setCollapsed }) {
     { icon: DollarSign, label: 'Finance', path: '/finance', roles: ['super_admin', 'campus_admin', 'accountant'] },
     { icon: Bell, label: 'Announcements', path: '/announcements', roles: ['super_admin', 'campus_admin', 'teacher'] },
     { icon: Activity, label: 'Notifications', path: '/notifications', roles: ['super_admin', 'campus_admin', 'teacher', 'accountant'] },
+    { icon: FileText, label: 'Exams', path: '/exams', roles: ['super_admin', 'campus_admin', 'teacher'] },
   ]
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role))
@@ -2364,6 +2365,298 @@ function TeachersPage() {
   )
 }
 
+function ExamsPage() {
+  const { user } = useAuth()
+  const { selectedCampus } = useCampus()
+  const [exams, setExams] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [message, setMessage] = useState('')
+  const [classes, setClasses] = useState([])
+  const [subjects, setSubjects] = useState([])
+  const [selectedSubjects, setSelectedSubjects] = useState([])
+  const [form, setForm] = useState({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' })
+  const [marksView, setMarksView] = useState(null)
+  const [marksData, setMarksData] = useState([])
+  const [reportView, setReportView] = useState(null)
+  const [reportData, setReportData] = useState(null)
+
+  const loadExams = () => {
+    setLoading(true)
+    const params = {}
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/exams', { params }).then(res => { setExams(res.data.data); setLoading(false) }).catch(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadExams()
+    api().get('/classes').then(r => setClasses(r.data.data))
+    api().get('/classes/teachers').then(r => {}).catch(() => {})
+  }, [selectedCampus])
+
+  const loadSubjects = (classId) => {
+    api().get('/classes/' + classId + '/sections').then(r => {}).catch(() => {})
+    api().get('/exams/0/subjects').catch(() => {})
+  }
+
+  const handleCreate = (e) => {
+    e.preventDefault()
+    const data = { ...form, class_id: parseInt(form.class_id), campus_id: form.campus_id ? parseInt(form.campus_id) : undefined, total_marks: parseInt(form.total_marks), passing_marks: parseInt(form.passing_marks), subject_ids: selectedSubjects.map(s => ({ id: s.id, max_marks: parseInt(form.total_marks), passing_marks: parseInt(form.passing_marks) })) }
+    api().post('/exams', data).then(() => {
+      setMessage('Exam created!'); setShowForm(false); loadExams()
+      setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([])
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const openMarksEntry = (exam) => {
+    setMarksView(exam)
+    api().get(`/exams/${exam.id}/students`).then(res => {
+      const { students, subjects: subs, existingMarks } = res.data.data
+      const initial = []
+      students.forEach(s => {
+        subs.forEach(sub => {
+          const existing = existingMarks.find(m => m.student_id === s.id && m.subject_id === sub.subject_id)
+          initial.push({ student_id: s.id, student_name: `${s.first_name} ${s.last_name}`, student_code: s.student_code, subject_id: sub.subject_id, subject_name: sub.subject_name, max_marks: sub.max_marks, marks_obtained: existing ? existing.marks_obtained : '', remarks: existing ? existing.remarks : '' })
+        })
+      })
+      setMarksData(initial)
+    }).catch(err => alert('Error loading data'))
+  }
+
+  const updateMark = (idx, field, value) => {
+    const updated = [...marksData]
+    updated[idx] = { ...updated[idx], [field]: value }
+    setMarksData(updated)
+  }
+
+  const saveMarks = () => {
+    const marks = marksData.filter(m => m.marks_obtained !== '').map(m => ({ student_id: m.student_id, subject_id: m.subject_id, marks_obtained: parseFloat(m.marks_obtained) || 0, remarks: m.remarks }))
+    api().post(`/exams/${marksView.id}/marks`, { marks }).then(() => {
+      setMessage('Marks saved!'); setMarksView(null); loadExams()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const openReport = (exam) => {
+    setReportView(exam)
+    api().get(`/exams/${exam.id}/report`).then(res => {
+      setReportData(res.data.data)
+    }).catch(err => alert('Error loading report'))
+  }
+
+  const deleteExam = (id) => {
+    if (!confirm('Delete this exam?')) return
+    api().delete(`/exams/${id}`).then(() => { setMessage('Exam deleted!'); loadExams(); setTimeout(() => setMessage(''), 3000) }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const toggleSubject = (sub) => {
+    setSelectedSubjects(prev => prev.find(s => s.id === sub.id) ? prev.filter(s => s.id !== sub.id) : [...prev, sub])
+  }
+
+  const filteredClasses = selectedCampus ? classes.filter(c => c.campus_id === selectedCampus) : classes
+
+  const statusColors = { upcoming: 'bg-blue-100 text-blue-700', ongoing: 'bg-amber-100 text-amber-700', completed: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700' }
+
+  if (marksView) {
+    const students = [...new Set(marksData.map(m => ({ id: m.student_id, name: m.student_name, code: m.student_code })))].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+    const subjectsList = [...new Set(marksData.map(m => ({ id: m.subject_id, name: m.subject_name, max: m.max_marks })))]
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <button onClick={() => setMarksView(null)} className="text-blue-600 hover:text-blue-800 text-sm mb-1">&larr; Back to Exams</button>
+            <h1 className="text-2xl font-bold">Marks Entry: {marksView.name}</h1>
+            <p className="text-sm text-gray-500">{marksView.class_name} &middot; {students.length} students &middot; {subjectsList.length} subjects</p>
+          </div>
+          <button onClick={saveMarks} className="btn-primary">Save All Marks</button>
+        </div>
+        {message && <div className="px-4 py-3 rounded-lg text-sm bg-green-50 text-green-700">{message}</div>}
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="table-header">
+                  <th className="px-3 py-2">Student</th>
+                  {subjectsList.map(s => <th key={s.id} className="px-3 py-2 text-center">{s.name} ({s.max})</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {students.map(student => (
+                  <tr key={student.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2"><p className="font-medium">{student.name}</p><p className="text-xs text-gray-500">{student.code}</p></td>
+                    {subjectsList.map((sub, si) => {
+                      const idx = marksData.findIndex(m => m.student_id === student.id && m.subject_id === sub.id)
+                      return (
+                        <td key={sub.id} className="px-3 py-2 text-center">
+                          <input type="number" className="input-field w-20 text-center text-sm py-1" value={marksData[idx]?.marks_obtained || ''} onChange={e => updateMark(idx, 'marks_obtained', e.target.value)} min="0" max={sub.max} placeholder="0" />
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (reportView && reportData) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <button onClick={() => { setReportView(null); setReportData(null) }} className="text-blue-600 hover:text-blue-800 text-sm mb-1">&larr; Back to Exams</button>
+            <h1 className="text-2xl font-bold">Report Card: {reportData.exam.name}</h1>
+            <p className="text-sm text-gray-500">{reportData.exam.class_name} &middot; {reportData.exam.campus_name}</p>
+          </div>
+          <button onClick={() => window.print()} className="btn-primary">Print Report</button>
+        </div>
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="table-header">
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">Student</th>
+                  {reportData.subjects.map(s => <th key={s.subject_id} className="px-3 py-2 text-center">{s.subject_name}</th>)}
+                  <th className="px-3 py-2 text-center">Total</th>
+                  <th className="px-3 py-2 text-center">%</th>
+                  <th className="px-3 py-2 text-center">Grade</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {reportData.reportData.map(r => (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-bold">{r.position}</td>
+                    <td className="px-3 py-2"><p className="font-medium">{r.first_name} {r.last_name}</p><p className="text-xs text-gray-500">{r.student_code}</p></td>
+                    {r.subjects.map((s, i) => <td key={i} className="px-3 py-2 text-center">{s.marks_obtained}/{s.max_marks}</td>)}
+                    <td className="px-3 py-2 text-center font-bold">{r.totalObtained}/{r.totalMax}</td>
+                    <td className="px-3 py-2 text-center font-bold">{r.percentage}%</td>
+                    <td className="px-3 py-2 text-center"><span className={`px-2 py-1 text-xs font-bold rounded-full ${r.overallGrade === 'A+' || r.overallGrade === 'A' ? 'bg-green-100 text-green-700' : r.overallGrade === 'F' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{r.overallGrade}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Exams & Results</h1>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">{exams.length} exams</span>
+          {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
+            <button onClick={() => { setShowForm(!showForm); setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([]) }} className="btn-primary">
+              <Plus className="w-4 h-4 mr-1 inline" /> New Exam
+            </button>
+          )}
+        </div>
+      </div>
+      {message && <div className="px-4 py-3 rounded-lg text-sm bg-green-50 text-green-700">{message}</div>}
+
+      {showForm && (
+        <div className="card">
+          <h3 className="font-bold mb-3">Create New Exam</h3>
+          <form onSubmit={handleCreate} className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Exam Name *</label>
+                <input className="input-field" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required placeholder="e.g. Midterm Exam 2026" />
+              </div>
+              <div>
+                <label className="label">Type</label>
+                <select className="input-field" value={form.type} onChange={e => setForm({...form, type: e.target.value})}>
+                  <option value="midterm">Midterm</option><option value="final">Final</option><option value="quiz">Quiz</option><option value="assignment">Assignment</option><option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Class *</label>
+                <select className="input-field" value={form.class_id} onChange={e => setForm({...form, class_id: e.target.value})} required>
+                  <option value="">Select Class</option>
+                  {filteredClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              {user?.role === 'super_admin' && (
+                <div>
+                  <label className="label">Campus</label>
+                  <select className="input-field" value={form.campus_id} onChange={e => setForm({...form, campus_id: e.target.value})}>
+                    <option value="">Select Campus</option><option value="1">Khanpur Road</option><option value="2">UET Campus</option>
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">Total Marks</label>
+                <input type="number" className="input-field" value={form.total_marks} onChange={e => setForm({...form, total_marks: e.target.value})} min="1" />
+              </div>
+              <div>
+                <label className="label">Passing Marks</label>
+                <input type="number" className="input-field" value={form.passing_marks} onChange={e => setForm({...form, passing_marks: e.target.value})} min="0" />
+              </div>
+              <div>
+                <label className="label">Start Date</label>
+                <input type="date" className="input-field" value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">End Date</label>
+                <input type="date" className="input-field" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
+              <button type="submit" className="btn-primary">Create Exam</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="card overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead><tr className="table-header">
+              <th className="px-4 py-3">Exam</th><th className="px-4 py-3">Class</th><th className="px-4 py-3">Campus</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Marks</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Students</th><th className="px-4 py-3 text-center">Actions</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={8} className="text-center py-10 text-gray-500">Loading...</td></tr>
+              ) : exams.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-10 text-gray-500">No exams found</td></tr>
+              ) : exams.map(e => (
+                <tr key={e.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3"><p className="text-sm font-medium">{e.name}</p><p className="text-xs text-gray-500">{formatDate(e.start_date)}</p></td>
+                  <td className="px-4 py-3 text-sm">{e.class_name}</td>
+                  <td className="px-4 py-3 text-xs"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full">{e.campus_name?.split(' - ')[1]}</span></td>
+                  <td className="px-4 py-3 text-sm capitalize">{e.type}</td>
+                  <td className="px-4 py-3 text-sm">{e.total_marks}</td>
+                  <td className="px-4 py-3"><span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[e.status]}`}>{e.status}</span></td>
+                  <td className="px-4 py-3 text-sm text-center">{e.students_entered}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => openMarksEntry(e)} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg">Marks</button>
+                      <button onClick={() => openReport(e)} className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg">Report</button>
+                      {['super_admin', 'campus_admin'].includes(user?.role) && (
+                        <button onClick={() => deleteExam(e.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function NotificationsPage() {
   const [activeTab, setActiveTab] = useState('notifications')
   const [notifications, setNotifications] = useState([])
@@ -2589,6 +2882,7 @@ function App() {
           <Route path="/finance" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','accountant']}><FinancePage /></ProtectedRoute>} />
           <Route path="/announcements" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><AnnouncementsPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          <Route path="/exams" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ExamsPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
       </CampusContext.Provider>
