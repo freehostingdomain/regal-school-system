@@ -84,7 +84,9 @@ router.get('/vouchers', authenticate, async (req, res) => {
 
     let query = `
       SELECT fv.*, s.student_id as student_code, s.first_name, s.last_name, s.father_name,
-             c.name as class_name
+             c.name as class_name,
+             (SELECT fp.id FROM fee_payments fp WHERE fp.voucher_id = fv.id ORDER BY fp.id DESC LIMIT 1) as last_payment_id,
+             COALESCE((SELECT SUM(fp2.amount) FROM fee_payments fp2 WHERE fp2.voucher_id = fv.id), 0) as total_paid
       FROM fee_vouchers fv
       JOIN students s ON fv.student_id = s.id
       LEFT JOIN classes c ON s.class_id = c.id
@@ -273,6 +275,109 @@ router.get('/reports', authenticate, authorize('super_admin', 'campus_admin', 't
     res.json({ success: true, data: result.rows, month: targetMonth, year: targetYear });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/receipt/:paymentId', async (req, res) => {
+  try {
+    const db = getDb();
+    const pool = getPool();
+    const { paymentId } = req.params;
+
+    // Accept token from query param (for new tab downloads)
+    const token = req.query.token || (req.headers.authorization?.split(' ')[1]);
+    if (!token) return res.status(401).json({ success: false, message: 'No token.' });
+    
+    const jwt = require('jsonwebtoken');
+    const { JWT_SECRET } = require('../middleware/auth');
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userResult = await pool.query('SELECT id, name, role FROM users WHERE id = $1', [decoded.userId]);
+    if (!userResult.rows.length) return res.status(401).json({ success: false, message: 'Invalid user.' });
+
+    const paymentResult = await pool.query(`
+      SELECT fp.*, fv.month, fv.year, fv.total_amount as voucher_amount, fv.fee_type,
+             s.first_name, s.last_name, s.student_id as student_code, s.father_name,
+             c.name as class_name, u.name as received_by_name
+      FROM fee_payments fp
+      JOIN fee_vouchers fv ON fp.voucher_id = fv.id
+      JOIN students s ON fv.student_id = s.id
+      LEFT JOIN classes c ON fv.class_id = c.id
+      LEFT JOIN users u ON fp.received_by = u.id
+      WHERE fp.id = $1
+    `, [paymentId]);
+
+    if (!paymentResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Payment not found.' });
+    }
+
+    const p = paymentResult.rows[0];
+
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=receipt-${p.receipt_number}.pdf`);
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(20).font('Helvetica-Bold').text('REGAL MONTESSORI & SCHOOL SYSTEM', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').text('Fee Payment Receipt', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    // Receipt info
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text(`Receipt No: ${p.receipt_number}`, 50, doc.y);
+    doc.text(`Date: ${new Date(p.payment_date).toLocaleDateString('en-PK')}`, 400, doc.y - 14);
+    doc.moveDown(0.8);
+
+    // Student info
+    doc.fontSize(11).font('Helvetica-Bold').text('Student Information', 50, doc.y);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Name: ${p.first_name} ${p.last_name}`, 50, doc.y);
+    doc.text(`Student ID: ${p.student_code}`, 400, doc.y - 14);
+    doc.text(`Father: ${p.father_name}`, 50, doc.y);
+    doc.text(`Class: ${p.class_name}`, 400, doc.y - 14);
+    doc.moveDown(0.8);
+
+    // Payment details
+    doc.fontSize(11).font('Helvetica-Bold').text('Payment Details', 50, doc.y);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Fee Type: ${p.fee_type || 'Tuition Fee'}`, 50, doc.y);
+    doc.text(`Period: ${p.month} ${p.year}`, 400, doc.y - 14);
+    doc.text(`Voucher Amount: Rs. ${p.voucher_amount}`, 50, doc.y);
+    doc.text(`Amount Paid: Rs. ${p.amount}`, 400, doc.y - 14);
+    doc.text(`Payment Method: ${p.payment_method}`, 50, doc.y);
+    if (p.transaction_id) doc.text(`Transaction ID: ${p.transaction_id}`, 400, doc.y - 14);
+    doc.moveDown(0.8);
+
+    // Amount box
+    doc.rect(50, doc.y, 495, 40).fillAndStroke('#f0f9ff', '#3b82f6');
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#1d4ed8');
+    doc.text(`Total Paid: Rs. ${p.amount}`, 50, doc.y + 12, { align: 'center', width: 495 });
+    doc.fillColor('black');
+    doc.moveDown(1.5);
+
+    // Received by
+    doc.fontSize(9).font('Helvetica').text(`Received by: ${p.received_by_name || 'Admin'}`, 50, doc.y);
+    doc.moveDown(1);
+
+    // Footer
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.3);
+    doc.fontSize(8).font('Helvetica').fillColor('#666666');
+    doc.text('This is a computer-generated receipt. For queries, contact the school office.', { align: 'center' });
+    doc.text('Regal Montessori & School System, Taxila, Pakistan', { align: 'center' });
+
+    doc.end();
+  } catch (error) {
+    console.error('Receipt generation error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 });
 

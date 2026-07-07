@@ -1687,14 +1687,28 @@ function FinancePage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {v.status !== 'paid' && (
-                          <button
-                            onClick={() => { setShowPaymentModal(v); setPaymentAmount(String(v.total_amount)); }}
-                            className="btn-success text-xs py-1 px-3"
-                          >
-                            Pay Now
-                          </button>
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {v.status !== 'paid' && (
+                            <button
+                              onClick={() => { setShowPaymentModal(v); setPaymentAmount(String(v.total_amount)); }}
+                              className="btn-success text-xs py-1 px-3"
+                            >
+                              Pay Now
+                            </button>
+                          )}
+                          {v.last_payment_id && (
+                            <button
+                              onClick={() => {
+                                const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+                                const token = localStorage.getItem('token');
+                                window.open(`${baseURL}/fees/receipt/${v.last_payment_id}?token=${token}`, '_blank');
+                              }}
+                              className="text-xs py-1 px-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                            >
+                              Receipt
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
