@@ -2416,10 +2416,6 @@ function StaffAttendancePage() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1)
-  const [viewYear, setViewYear] = useState(new Date().getFullYear())
-  const [viewUserId, setViewUserId] = useState(null)
-  const [viewSummary, setViewSummary] = useState(null)
 
   const loadAttendance = () => {
     setLoading(true)
@@ -2459,13 +2455,6 @@ function StaffAttendancePage() {
     })
   }
 
-  const loadSummary = (userId) => {
-    setViewUserId(userId)
-    api().get(`/staff-attendance/summary?user_id=${userId}&month=${viewMonth}&year=${viewYear}`).then(res => {
-      setViewSummary(res.data)
-    }).catch(() => setViewSummary(null))
-  }
-
   const presentCount = records.filter(r => r.status === 'present').length
   const lateCount = records.filter(r => r.status === 'late').length
   const absentCount = records.filter(r => r.status === 'absent').length
@@ -2475,129 +2464,100 @@ function StaffAttendancePage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Staff Attendance</h1>
-        <div className="flex items-center gap-3">
-          <input type="date" className="input-field" value={date} onChange={e => setDate(e.target.value)} />
-          {user?.role === 'super_admin' && (
-            <button onClick={saveAttendance} disabled={saving} className="btn-primary">
-              {saving ? 'Saving...' : 'Save Attendance'}
-            </button>
-          )}
+        <input type="date" className="input-field w-auto" value={date} onChange={e => setDate(e.target.value)} />
+      </div>
+
+      <div className="grid grid-cols-5 gap-4">
+        <div className="card text-center">
+          <p className="text-3xl font-bold">{records.length}</p>
+          <p className="text-sm text-gray-500">Total Staff</p>
+        </div>
+        <div className="card text-center bg-green-50">
+          <p className="text-3xl font-bold text-green-600">{presentCount}</p>
+          <p className="text-sm text-green-600">Present</p>
+        </div>
+        <div className="card text-center bg-amber-50">
+          <p className="text-3xl font-bold text-amber-600">{lateCount}</p>
+          <p className="text-sm text-amber-600">Late</p>
+        </div>
+        <div className="card text-center bg-red-50">
+          <p className="text-3xl font-bold text-red-600">{absentCount}</p>
+          <p className="text-sm text-red-600">Absent</p>
+        </div>
+        <div className="card text-center bg-blue-50">
+          <p className="text-3xl font-bold text-blue-600">{leaveCount}</p>
+          <p className="text-sm text-blue-600">On Leave</p>
         </div>
       </div>
 
-      {message && <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('Error') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message}</div>}
+      {message && (
+        <div className={`px-4 py-3 rounded-lg text-sm ${message.startsWith('Error') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {message}
+        </div>
+      )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-          <p className="text-2xl font-bold">{presentCount}</p>
-          <p className="text-xs text-gray-500">Present</p>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-          <p className="text-2xl font-bold text-yellow-600">{lateCount}</p>
-          <p className="text-xs text-gray-500">Late</p>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-          <p className="text-2xl font-bold text-red-600">{absentCount}</p>
-          <p className="text-xs text-gray-500">Absent</p>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-          <p className="text-2xl font-bold text-blue-600">{leaveCount}</p>
-          <p className="text-xs text-gray-500">On Leave</p>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
-      ) : (
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left">Staff Member</th>
-                <th className="px-4 py-3 text-left">Role</th>
-                <th className="px-4 py-3 text-center">Status</th>
-                <th className="px-4 py-3 text-center">Actions</th>
+      <div className="card overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="table-header">
+                <th className="px-4 py-3">Staff ID</th>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Designation</th>
+                <th className="px-4 py-3 text-center">Mark Attendance</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {records.length === 0 ? (
-                <tr><td colSpan={4} className="text-center py-10 text-gray-500">No staff found</td></tr>
-              ) : records.map((r, idx) => (
+              {loading ? (
+                <tr><td colSpan={5} className="text-center py-10 text-gray-500">Loading...</td></tr>
+              ) : records.length === 0 ? (
+                <tr><td colSpan={5} className="text-center py-10 text-gray-500">No staff found</td></tr>
+              ) : records.map((r, i) => (
                 <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm font-mono">{r.id}</td>
                   <td className="px-4 py-3">
-                    <p className="font-medium">{r.name}</p>
+                    <p className="text-sm font-medium">{r.name}</p>
                     <p className="text-xs text-gray-500">{r.email}</p>
                   </td>
+                  <td className="px-4 py-3 text-sm capitalize">{r.role?.replace('_', ' ')}</td>
+                  <td className="px-4 py-3 text-sm">{r.designation || '-'}</td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 capitalize">{r.role?.replace('_', ' ')}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1">
-                      {['present', 'late', 'absent', 'leave'].map(s => (
-                        <button key={s} onClick={() => updateStatus(idx, s)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg capitalize transition-colors ${
-                            r.status === s
-                              ? s === 'present' ? 'bg-green-600 text-white'
-                              : s === 'late' ? 'bg-yellow-500 text-white'
-                              : s === 'absent' ? 'bg-red-600 text-white'
-                              : 'bg-blue-600 text-white'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}>{s}</button>
-                      ))}
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={() => updateStatus(i, 'present')}
+                        className={`p-2 rounded-lg transition-colors ${r.status === 'present' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-green-100'}`}
+                        title="Present">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </button>
+                      <button onClick={() => updateStatus(i, 'late')}
+                        className={`p-2 rounded-lg transition-colors ${r.status === 'late' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-amber-100'}`}
+                        title="Late">
+                        <Clock className="w-5 h-5" />
+                      </button>
+                      <button onClick={() => updateStatus(i, 'absent')}
+                        className={`p-2 rounded-lg transition-colors ${r.status === 'absent' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-red-100'}`}
+                        title="Absent">
+                        <XCircle className="w-5 h-5" />
+                      </button>
+                      <button onClick={() => updateStatus(i, 'leave')}
+                        className={`p-2 rounded-lg transition-colors ${r.status === 'leave' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-blue-100'}`}
+                        title="Leave">
+                        <AlertTriangle className="w-5 h-5" />
+                      </button>
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <button onClick={() => loadSummary(r.id)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">View History</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
+      </div>
 
-      {viewUserId && viewSummary && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold">Attendance History</h2>
-                <button onClick={() => { setViewUserId(null); setViewSummary(null) }} className="text-gray-500 hover:text-gray-700">✕</button>
-              </div>
-              <div className="flex items-center gap-2 mb-4">
-                <select value={viewMonth} onChange={e => { setViewMonth(parseInt(e.target.value)); loadSummary(viewUserId) }} className="border rounded-lg px-3 py-2 text-sm">
-                  {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
-                    <option key={i} value={i + 1}>{m}</option>
-                  ))}
-                </select>
-                <select value={viewYear} onChange={e => { setViewYear(parseInt(e.target.value)); loadSummary(viewUserId) }} className="border rounded-lg px-3 py-2 text-sm">
-                  {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-5 gap-2 mb-4 text-center text-xs">
-                <div className="bg-green-50 rounded-lg p-2"><p className="font-bold text-lg text-green-600">{viewSummary.summary.present}</p><p>Present</p></div>
-                <div className="bg-yellow-50 rounded-lg p-2"><p className="font-bold text-lg text-yellow-600">{viewSummary.summary.late}</p><p>Late</p></div>
-                <div className="bg-red-50 rounded-lg p-2"><p className="font-bold text-lg text-red-600">{viewSummary.summary.absent}</p><p>Absent</p></div>
-                <div className="bg-blue-50 rounded-lg p-2"><p className="font-bold text-lg text-blue-600">{viewSummary.summary.leave}</p><p>Leave</p></div>
-                <div className="bg-gray-50 rounded-lg p-2"><p className="font-bold text-lg">{viewSummary.summary.percentage}%</p><p>Total</p></div>
-              </div>
-              <div className="space-y-1">
-                {viewSummary.data.length === 0 ? (
-                  <p className="text-center text-gray-500 py-4">No records</p>
-                ) : viewSummary.data.map(a => (
-                  <div key={a.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg text-sm">
-                    <span>{formatDate(a.date)}</span>
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${
-                      a.status === 'present' ? 'bg-green-100 text-green-700' :
-                      a.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                      a.status === 'absent' ? 'bg-red-100 text-red-700' :
-                      'bg-blue-100 text-blue-700'
-                    }`}>{a.status}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+      {records.length > 0 && (
+        <div className="flex justify-end">
+          <button onClick={saveAttendance} disabled={saving} className="btn-success px-8 py-3 text-lg">
+            {saving ? 'Saving...' : 'Save Attendance'}
+          </button>
         </div>
       )}
     </div>
