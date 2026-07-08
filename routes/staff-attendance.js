@@ -12,9 +12,11 @@ router.get('/', authenticate, authorize('super_admin', 'campus_admin', 'accounta
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     let query = `
-      SELECT u.id, u.name, u.email, u.role, u.campus_id, u.designation,
+      SELECT u.id, u.name, u.email, u.role, u.campus_id, u.gender, u.designation,
+             c.name as campus_name,
              sa.id as attendance_id, sa.status, sa.check_in_time, sa.check_out_time, sa.notes
       FROM users u
+      LEFT JOIN campuses c ON u.campus_id = c.id
       LEFT JOIN staff_attendance sa ON u.id = sa.user_id AND sa.date = $1
       WHERE u.is_active = 1 AND u.role IN ('teacher','campus_admin','accountant')
     `;

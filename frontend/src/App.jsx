@@ -2503,7 +2503,7 @@ function StaffAttendancePage() {
               <tr className="table-header">
                 <th className="px-4 py-3">Staff ID</th>
                 <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Campus</th>
                 <th className="px-4 py-3">Designation</th>
                 <th className="px-4 py-3 text-center">Mark Attendance</th>
               </tr>
@@ -2517,11 +2517,20 @@ function StaffAttendancePage() {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-mono">{r.id}</td>
                   <td className="px-4 py-3">
-                    <p className="text-sm font-medium">{r.name}</p>
-                    <p className="text-xs text-gray-500">{r.email}</p>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${r.gender === 'female' ? 'bg-pink-500' : 'bg-blue-600'}`}>
+                        {r.gender === 'female' ? 'F' : 'M'}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{r.name}</p>
+                        <p className="text-xs text-gray-500">{r.email}</p>
+                      </div>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-sm capitalize">{r.role?.replace('_', ' ')}</td>
-                  <td className="px-4 py-3 text-sm">{r.designation || '-'}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">{r.campus_name || 'All Campuses'}</span>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{r.designation || r.role?.replace('_', ' ')}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-2">
                       <button onClick={() => updateStatus(i, 'present')}
