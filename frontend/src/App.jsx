@@ -1096,6 +1096,8 @@ function ClassesPage() {
   const [editClass, setEditClass] = useState(null)
   const [message, setMessage] = useState('')
   const [showSections, setShowSections] = useState(null)
+  const [editingFee, setEditingFee] = useState(null)
+  const [feeValue, setFeeValue] = useState('')
 
   const loadClasses = () => {
     api().get('/classes').then(res => {
@@ -1125,6 +1127,17 @@ function ClassesPage() {
       loadClasses()
       setTimeout(() => setMessage(''), 3000)
     }).catch(err => alert(err.response?.data?.message || 'Error deleting class'))
+  }
+
+  const saveFee = (cls) => {
+    const fee = parseFloat(feeValue)
+    if (isNaN(fee) || fee < 0) { alert('Enter valid fee'); return }
+    api().put(`/classes/${cls.id}`, { monthly_fee: fee }).then(() => {
+      setMessage('Fee updated!')
+      setEditingFee(null)
+      loadClasses()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
   }
 
   const canEdit = ['super_admin', 'campus_admin', 'teacher', 'accountant'].includes(user?.role)
@@ -1187,13 +1200,23 @@ function ClassesPage() {
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center mt-4">
-                <div className="bg-blue-50 rounded-lg p-2">
+                <div className="bg-blue-50 rounded-lg p-2 cursor-pointer hover:bg-blue-100" onClick={() => loadClasses()} title="Click to refresh">
                   <p className="text-lg font-bold text-blue-600">{cls.student_count}</p>
-                  <p className="text-xs text-gray-500">Students</p>
+                  <p className="text-xs text-gray-500">Students ↻</p>
                 </div>
-                <div className="bg-green-50 rounded-lg p-2">
-                  <p className="text-lg font-bold text-green-600">{formatCurrency(cls.monthly_fee)}</p>
-                  <p className="text-xs text-gray-500">Monthly Fee</p>
+                <div className="bg-green-50 rounded-lg p-2 cursor-pointer" onClick={() => { setEditingFee(cls.id); setFeeValue(cls.monthly_fee || '') }}>
+                  {editingFee === cls.id ? (
+                    <div className="flex items-center gap-1">
+                      <input type="number" className="w-20 text-sm text-center border rounded px-1 py-0.5" value={feeValue} onChange={e => setFeeValue(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => e.key === 'Enter' && saveFee(cls)} autoFocus />
+                      <button onClick={e => { e.stopPropagation(); saveFee(cls) }} className="text-green-600 text-xs font-bold">✓</button>
+                      <button onClick={e => { e.stopPropagation(); setEditingFee(null) }} className="text-red-500 text-xs">✕</button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-lg font-bold text-green-600">{formatCurrency(cls.monthly_fee)}</p>
+                      <p className="text-xs text-gray-500">Monthly Fee ✎</p>
+                    </>
+                  )}
                 </div>
                 <div className="bg-purple-50 rounded-lg p-2">
                   <p className="text-lg font-bold text-purple-600">{cls.max_students}</p>
@@ -2389,6 +2412,8 @@ function ExamsPage() {
   const [exams, setExams] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showDatesheetModal, setShowDatesheetModal] = useState(false)
+  const [datesheetExamId, setDatesheetExamId] = useState('')
   const [message, setMessage] = useState('')
   const [classes, setClasses] = useState([])
   const [subjects, setSubjects] = useState([])
@@ -2691,9 +2716,14 @@ function ExamsPage() {
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">{exams.length} exams</span>
           {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
-            <button onClick={() => { setShowForm(!showForm); setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([]) }} className="btn-primary">
-              <Plus className="w-4 h-4 mr-1 inline" /> New Exam
-            </button>
+            <>
+              <button onClick={() => { setShowForm(!showForm); setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([]) }} className="btn-primary">
+                <Plus className="w-4 h-4 mr-1 inline" /> New Exam
+              </button>
+              <button onClick={() => { setShowDatesheetModal(!showDatesheetModal); setDatesheetExamId('') }} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium flex items-center gap-2">
+                <Calendar className="w-4 h-4" /> New Datesheet
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -2804,6 +2834,28 @@ function ExamsPage() {
               <button type="submit" className="btn-primary">Create Exam</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {showDatesheetModal && (
+        <div className="card">
+          <h3 className="font-bold mb-3">Select Exam for Datesheet</h3>
+          <p className="text-sm text-gray-500 mb-3">Choose an exam to create/edit its datesheet</p>
+          <div className="space-y-2">
+            {exams.map(e => (
+              <button key={e.id} onClick={() => { openDatesheet(e); setShowDatesheetModal(false) }}
+                className="w-full flex items-center justify-between p-3 rounded-lg border hover:bg-orange-50 hover:border-orange-300 text-left">
+                <div>
+                  <p className="font-medium">{e.name}</p>
+                  <p className="text-xs text-gray-500">{e.class_name} | {e.campus_name} | {e.type}</p>
+                </div>
+                <span className={`px-2 py-1 text-xs rounded-full ${e.is_datesheet_live ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {e.is_datesheet_live ? 'Live' : 'Draft'}
+                </span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setShowDatesheetModal(false)} className="mt-3 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
         </div>
       )}
 
@@ -3018,7 +3070,6 @@ function ParentPortalPage() {
   const [selectedChild, setSelectedChild] = useState(null)
   const [activeTab, setActiveTab] = useState('announcements')
   const [announcements, setAnnouncements] = useState([])
-  const [datesheets, setDatesheets] = useState([])
   const [liveResults, setLiveResults] = useState([])
   const [attendance, setAttendance] = useState(null)
   const [fees, setFees] = useState([])
@@ -3030,18 +3081,19 @@ function ParentPortalPage() {
   const [searching, setSearching] = useState(false)
   const [selectedExamId, setSelectedExamId] = useState(null)
   const [childReport, setChildReport] = useState(null)
+  const [allClassResults, setAllClassResults] = useState([])
+  const [attMonth, setAttMonth] = useState(new Date().getMonth() + 1)
+  const [attYear, setAttYear] = useState(new Date().getFullYear())
 
   useEffect(() => {
     Promise.all([
       api().get('/parent/children').catch(() => ({ data: [] })),
       api().get('/announcements').catch(() => ({ data: { data: [] } })),
-      api().get('/exams/live/datesheets').catch(() => ({ data: { data: [] } })),
       api().get('/exams/live/results').catch(() => ({ data: { data: [] } })),
-    ]).then(([childRes, annRes, dsRes, resRes]) => {
+    ]).then(([childRes, annRes, resRes]) => {
       setChildren(childRes.data || [])
       if (childRes.data?.length > 0) setSelectedChild(childRes.data[0])
       setAnnouncements(annRes.data?.data || [])
-      setDatesheets(dsRes.data?.data || [])
       setLiveResults(resRes.data?.data || [])
       setLoading(false)
     }).catch(() => setLoading(false))
@@ -3049,10 +3101,16 @@ function ParentPortalPage() {
 
   useEffect(() => {
     if (!selectedChild) return
+    setAttendance(null)
+    setFees([])
+    setChildReport(null)
+    setAllClassResults([])
+    setSelectedExamId(null)
+    setSearchResults([])
+    setSearchQuery('')
     if (activeTab === 'attendance') {
-      const now = new Date()
-      api().get(`/parent/attendance/${selectedChild.id}?month=${now.getMonth() + 1}&year=${now.getFullYear()}`)
-        .then(res => setAttendance(res.data)).catch(() => {})
+      api().get(`/parent/attendance/${selectedChild.id}?month=${attMonth}&year=${attYear}`)
+        .then(res => setAttendance(res.data)).catch(() => setAttendance({ attendance: [], summary: { total: 0, present: 0, absent: 0, late: 0, percentage: 0 } }))
     } else if (activeTab === 'fees') {
       api().get(`/parent/fees/${selectedChild.id}`)
         .then(res => setFees(res.data)).catch(() => {})
@@ -3060,15 +3118,21 @@ function ParentPortalPage() {
       api().get('/parent/profile')
         .then(res => setProfile(res.data)).catch(() => {})
     }
-  }, [selectedChild, activeTab])
+  }, [selectedChild, activeTab, attMonth, attYear])
 
   const loadChildReport = (examId) => {
     if (!selectedChild) return
     setSelectedExamId(examId)
+    setChildReport(null)
+    setAllClassResults([])
     api().get(`/exams/${examId}/report`).then(res => {
-      const report = res.data.data?.reportData?.find(r => r.id === selectedChild.id)
-      setChildReport(report ? { exam: res.data.data.exam, subjects: res.data.data.subjects, report } : null)
-    }).catch(() => setChildReport(null))
+      const report = res.data.data?.reportData || []
+      const exam = res.data.data?.exam
+      const subjects = res.data.data?.subjects
+      setAllClassResults(report)
+      const myChild = report.find(r => r.id === selectedChild.id)
+      setChildReport(myChild ? { exam, subjects, report: myChild } : null)
+    }).catch(() => { setChildReport(null); setAllClassResults([]) })
   }
 
   const searchStudent = () => {
@@ -3090,7 +3154,6 @@ function ParentPortalPage() {
 
   const tabs = [
     { key: 'announcements', label: 'Announcements', icon: Bell },
-    { key: 'datesheets', label: 'Exam Datesheets', icon: Calendar },
     { key: 'results', label: 'Exam Results', icon: BarChart3 },
     { key: 'child-profile', label: 'Child Profile', icon: Users },
     { key: 'attendance', label: 'Attendance', icon: ClipboardCheck },
@@ -3147,35 +3210,6 @@ function ParentPortalPage() {
         </div>
       )}
 
-      {activeTab === 'datesheets' && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Exam Datesheets (Live)</h2>
-          {datesheets.length === 0 ? (
-            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No live datesheets available</div>
-          ) : datesheets.map(exam => (
-            <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-5">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className="font-semibold text-lg">{exam.name}</h3>
-                  <p className="text-sm text-gray-500">{exam.class_name} | {exam.campus_name}</p>
-                </div>
-                <span className={`px-3 py-1 text-xs font-medium rounded-full ${
-                  exam.type === 'final' ? 'bg-purple-100 text-purple-700' :
-                  exam.type === 'midterm' ? 'bg-blue-100 text-blue-700' :
-                  'bg-gray-100 text-gray-700'
-                }`}>{exam.type}</span>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Start Date</p><p className="font-medium">{formatDate(exam.start_date)}</p></div>
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">End Date</p><p className="font-medium">{formatDate(exam.end_date)}</p></div>
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Total Marks</p><p className="font-medium">{exam.total_marks}</p></div>
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Passing Marks</p><p className="font-medium">{exam.passing_marks}</p></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {activeTab === 'results' && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">Exam Results</h2>
@@ -3218,9 +3252,32 @@ function ParentPortalPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {childReport.report.subjects?.map((sub, i) => (
                       <div key={i} className="bg-white rounded-lg p-3">
-                        <p className="text-xs text-gray-500">{sub.subject_name}</p>
+                        <p className="text-xs text-gray-500">{sub.subject || sub.subject_name}</p>
                         <p className="font-semibold">{sub.marks_obtained}/{sub.max_marks}</p>
                         <span className={`text-xs font-medium ${sub.grade === 'A+' || sub.grade === 'A' ? 'text-green-600' : sub.grade === 'F' ? 'text-red-600' : 'text-yellow-600'}`}>{sub.grade}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {allClassResults.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border p-5">
+                  <h3 className="font-semibold mb-3">All Students - {childReport?.exam?.name || 'Exam'}</h3>
+                  <div className="space-y-2">
+                    {allClassResults.map(r => (
+                      <div key={r.id} className={`flex items-center justify-between py-2 px-3 rounded-lg ${r.id === selectedChild?.id ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium w-8 text-gray-400">#{r.position}</span>
+                          <span className="font-medium">{r.first_name} {r.last_name}</span>
+                          <span className="text-xs text-gray-500">{r.student_code}</span>
+                          {r.id === selectedChild?.id && <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium">My Child</span>}
+                        </div>
+                        <div className="text-sm">
+                          <span className="font-bold">{r.totalObtained}/{r.totalMax}</span>
+                          <span className="ml-2 text-gray-500">{r.percentage}%</span>
+                          <span className={`ml-2 font-medium ${r.overallGrade === 'A+' || r.overallGrade === 'A' ? 'text-green-600' : r.overallGrade === 'F' ? 'text-red-600' : 'text-blue-600'}`}>{r.overallGrade}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -3292,8 +3349,26 @@ function ParentPortalPage() {
 
       {activeTab === 'attendance' && selectedChild && (
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Attendance</h2>
-          {attendance ? (
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Attendance</h2>
+            <div className="flex items-center gap-2">
+              <select value={attMonth} onChange={e => setAttMonth(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+                {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
+                  <option key={i} value={i + 1}>{m}</option>
+                ))}
+              </select>
+              <select value={attYear} onChange={e => setAttYear(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+                {[2024, 2025, 2026, 2027].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {attendance === null ? (
+            <p className="text-gray-500">Loading attendance...</p>
+          ) : attendance.attendance.length === 0 ? (
+            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No attendance records for this month</div>
+          ) : (
             <>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="bg-white rounded-xl p-4 shadow-sm border text-center"><p className="text-2xl font-bold">{attendance.summary.total}</p><p className="text-xs text-gray-500">Total Days</p></div>
@@ -3334,7 +3409,7 @@ function ParentPortalPage() {
                 </table>
               </div>
             </>
-          ) : <p className="text-gray-500">Loading attendance...</p>}
+          )}
         </div>
       )}
 

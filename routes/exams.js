@@ -356,12 +356,27 @@ router.get('/:id/report', authenticate, async (req, res) => {
 
     if (!exam) return res.status(404).json({ success: false, message: 'Exam not found.' });
 
-    const students = (await pool.query(`
-      SELECT DISTINCT s.id, s.student_id as student_code, s.first_name, s.last_name, s.father_name
+    const examClassId = exam.class_id;
+    
+    // Get students in exam's class
+    let studentsQuery = `
+      SELECT DISTINCT s.id, s.student_id as student_code, s.first_name, s.last_name, s.father_name, s.parent_id
       FROM students s
       WHERE s.class_id = $1 AND s.is_active = 1
-      ORDER BY s.student_id ASC
-    `, [exam.class_id])).rows;
+    `;
+    let studentsParams = [examClassId];
+    
+    // If parent is viewing, also include their children even if in different class
+    if (req.user.role === 'parent') {
+      const parent = (await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id])).rows[0];
+      if (parent) {
+        studentsQuery += ` OR (s.parent_id = $2 AND s.is_active = 1)`;
+        studentsParams.push(parent.id);
+      }
+    }
+    studentsQuery += ' ORDER BY s.student_id ASC';
+    
+    const students = (await pool.query(studentsQuery, studentsParams)).rows;
 
     const subjects = (await pool.query(`
       SELECT es.*, sub.name as subject_name
