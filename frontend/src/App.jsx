@@ -2975,6 +2975,11 @@ function ParentPortalPage() {
   const [results, setResults] = useState([])
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [selectedExamId, setSelectedExamId] = useState(null)
+  const [childReport, setChildReport] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -2993,7 +2998,7 @@ function ParentPortalPage() {
   }, [])
 
   useEffect(() => {
-    if (!selectedChild || activeTab === 'announcements' || activeTab === 'datesheets' || activeTab === 'results') return
+    if (!selectedChild) return
     if (activeTab === 'attendance') {
       const now = new Date()
       api().get(`/parent/attendance/${selectedChild.id}?month=${now.getMonth() + 1}&year=${now.getFullYear()}`)
@@ -3001,24 +3006,34 @@ function ParentPortalPage() {
     } else if (activeTab === 'fees') {
       api().get(`/parent/fees/${selectedChild.id}`)
         .then(res => setFees(res.data)).catch(() => {})
-    } else if (activeTab === 'child-results') {
-      api().get(`/parent/results/${selectedChild.id}`)
-        .then(res => setResults(res.data)).catch(() => {})
     } else if (activeTab === 'child-profile') {
       api().get('/parent/profile')
         .then(res => setProfile(res.data)).catch(() => {})
     }
   }, [selectedChild, activeTab])
 
-  const loadExamReport = (examId) => {
+  const loadChildReport = (examId) => {
     if (!selectedChild) return
+    setSelectedExamId(examId)
     api().get(`/exams/${examId}/report`).then(res => {
-      const studentReport = res.data.data?.reportData?.find(r => r.id === selectedChild.id)
-      if (studentReport) {
-        setResults([{ ...res.data.data.exam, report: studentReport, subjects: res.data.data.subjects }])
-        setActiveTab('child-results')
-      }
-    }).catch(() => {})
+      const report = res.data.data?.reportData?.find(r => r.id === selectedChild.id)
+      setChildReport(report ? { exam: res.data.data.exam, subjects: res.data.data.subjects, report } : null)
+    }).catch(() => setChildReport(null))
+  }
+
+  const searchStudent = () => {
+    if (!searchQuery.trim() || !selectedExamId) return
+    setSearching(true)
+    api().get(`/exams/${selectedExamId}/report`).then(res => {
+      const all = res.data.data?.reportData || []
+      const filtered = all.filter(r => {
+        const name = `${r.first_name} ${r.last_name}`.toLowerCase()
+        const code = r.student_code?.toLowerCase() || ''
+        return name.includes(searchQuery.toLowerCase()) || code.includes(searchQuery.toLowerCase())
+      })
+      setSearchResults(filtered)
+      setSearching(false)
+    }).catch(() => { setSearchResults([]); setSearching(false) })
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
@@ -3112,26 +3127,86 @@ function ParentPortalPage() {
       )}
 
       {activeTab === 'results' && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Exam Results (Published)</h2>
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">Exam Results</h2>
           {liveResults.length === 0 ? (
             <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No published results yet</div>
-          ) : liveResults.map(exam => (
-            <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-5">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className="font-semibold text-lg">{exam.name}</h3>
-                  <p className="text-sm text-gray-500">{exam.class_name} | {exam.campus_name}</p>
+          ) : (
+            <>
+              <div className="space-y-3">
+                {liveResults.map(exam => (
+                  <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <h3 className="font-semibold text-lg">{exam.name}</h3>
+                        <p className="text-sm text-gray-500">{exam.class_name} | {exam.campus_name}</p>
+                      </div>
+                      <button onClick={() => loadChildReport(exam.id)} className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Report</button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mt-3 text-sm">
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Start</p><p className="font-medium">{formatDate(exam.start_date)}</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">End</p><p className="font-medium">{formatDate(exam.end_date)}</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Total Marks</p><p className="font-medium">{exam.total_marks}</p></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {childReport && (
+                <div className="bg-blue-50 rounded-xl border border-blue-200 p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-medium">My Child</span>
+                    <h3 className="font-semibold text-lg">{childReport.report.first_name} {childReport.report.last_name}</h3>
+                    <span className="text-sm text-gray-500">- {childReport.exam.name}</span>
+                  </div>
+                  <div className="flex items-center gap-4 mb-3 text-sm">
+                    <span>Position: <strong>#{childReport.report.position}</strong></span>
+                    <span>Total: <strong>{childReport.report.totalObtained}/{childReport.report.totalMax}</strong></span>
+                    <span>Percentage: <strong>{childReport.report.percentage}%</strong></span>
+                    <span>Grade: <strong className={`text-lg ${childReport.report.overallGrade === 'A+' || childReport.report.overallGrade === 'A' ? 'text-green-600' : childReport.report.overallGrade === 'F' ? 'text-red-600' : 'text-blue-600'}`}>{childReport.report.overallGrade}</strong></span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {childReport.report.subjects?.map((sub, i) => (
+                      <div key={i} className="bg-white rounded-lg p-3">
+                        <p className="text-xs text-gray-500">{sub.subject_name}</p>
+                        <p className="font-semibold">{sub.marks_obtained}/{sub.max_marks}</p>
+                        <span className={`text-xs font-medium ${sub.grade === 'A+' || sub.grade === 'A' ? 'text-green-600' : sub.grade === 'F' ? 'text-red-600' : 'text-yellow-600'}`}>{sub.grade}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <button onClick={() => loadExamReport(exam.id)} className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Report</button>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mt-3 text-sm">
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Start</p><p className="font-medium">{formatDate(exam.start_date)}</p></div>
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">End</p><p className="font-medium">{formatDate(exam.end_date)}</p></div>
-                <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Total Marks</p><p className="font-medium">{exam.total_marks}</p></div>
-              </div>
-            </div>
-          ))}
+              )}
+
+              {selectedExamId && (
+                <div className="bg-white rounded-xl shadow-sm border p-5">
+                  <h3 className="font-semibold mb-3">Search Other Students</h3>
+                  <div className="flex gap-2">
+                    <input className="input-field flex-1" placeholder="Search by name or student ID..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchStudent()} />
+                    <button onClick={searchStudent} className="btn-primary">Search</button>
+                  </div>
+                  {searchResults.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {searchResults.map(r => (
+                        <div key={r.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <span className="font-medium">{r.first_name} {r.last_name}</span>
+                            <span className="text-xs text-gray-500 ml-2">{r.student_code}</span>
+                            {r.id === selectedChild?.id && <span className="ml-2 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs">My Child</span>}
+                          </div>
+                          <div className="text-sm">
+                            <span className="font-bold">{r.totalObtained}/{r.totalMax}</span>
+                            <span className="ml-2 text-gray-500">{r.percentage}%</span>
+                            <span className={`ml-2 font-medium ${r.overallGrade === 'A+' || r.overallGrade === 'A' ? 'text-green-600' : r.overallGrade === 'F' ? 'text-red-600' : 'text-blue-600'}`}>{r.overallGrade}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {searching && <p className="text-sm text-gray-500 mt-2">Searching...</p>}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -3248,39 +3323,6 @@ function ParentPortalPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'child-results' && selectedChild && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">{selectedChild.first_name}'s Results</h2>
-          {results.length === 0 ? (
-            <div className="bg-white rounded-xl p-10 shadow-sm border text-center text-gray-500">No results available</div>
-          ) : results.map((exam, idx) => (
-            <div key={idx} className="bg-white rounded-xl shadow-sm border p-5">
-              {exam.report ? (
-                <>
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="font-semibold text-lg">{exam.name}</h3>
-                      <p className="text-sm text-gray-500">Position: #{exam.report.position} | {exam.report.percentage}% | {exam.report.overallGrade}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {exam.report.subjects?.map((sub, i) => (
-                      <div key={i} className="bg-gray-50 rounded-lg p-3">
-                        <p className="text-xs text-gray-500">{sub.subject_name}</p>
-                        <p className="font-semibold">{sub.marks_obtained}/{sub.max_marks}</p>
-                        <span className={`text-xs font-medium ${sub.grade === 'A+' || sub.grade === 'A' ? 'text-green-600' : sub.grade === 'F' ? 'text-red-600' : 'text-yellow-600'}`}>{sub.grade}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="text-gray-500">Report data loading...</p>
-              )}
-            </div>
-          ))}
         </div>
       )}
     </div>
