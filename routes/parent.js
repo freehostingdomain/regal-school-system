@@ -1,18 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { getPool } = require('../database');
 
 // GET /parent/children - parent ke saare bache
 router.get('/children', authenticate, async (req, res) => {
   try {
-    const parent = await req.db.query(
-      'SELECT id FROM parents WHERE user_id = $1',
-      [req.user.id]
-    );
+    const pool = getPool();
+    const parent = await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id]);
     if (!parent.rows.length) return res.json([]);
 
     const parentId = parent.rows[0].id;
-    const result = await req.db.query(`
+    const result = await pool.query(`
       SELECT s.*, c.name as class_name, sec.name as section_name,
              camp.name as campus_name
       FROM students s
@@ -32,6 +31,7 @@ router.get('/children', authenticate, async (req, res) => {
 // GET /parent/attendance/:studentId - bache ki attendance
 router.get('/attendance/:studentId', authenticate, async (req, res) => {
   try {
+    const pool = getPool();
     const { studentId } = req.params;
     const { month, year } = req.query;
 
@@ -49,9 +49,8 @@ router.get('/attendance/:studentId', authenticate, async (req, res) => {
     }
     query += ' ORDER BY a.date DESC';
 
-    const result = await req.db.query(query, params);
+    const result = await pool.query(query, params);
 
-    // Summary
     const total = result.rows.length;
     const present = result.rows.filter(r => r.status === 'present').length;
     const absent = result.rows.filter(r => r.status === 'absent').length;
@@ -71,11 +70,12 @@ router.get('/attendance/:studentId', authenticate, async (req, res) => {
 // GET /parent/fees/:studentId - bache ke fee vouchers
 router.get('/fees/:studentId', authenticate, async (req, res) => {
   try {
+    const pool = getPool();
     const { studentId } = req.params;
-    const result = await req.db.query(`
+    const result = await pool.query(`
       SELECT fv.*, c.name as class_name,
              COALESCE(paid.total_paid, 0) as total_paid,
-             (fv.amount - COALESCE(paid.total_paid, 0)) as balance
+             (fv.total_amount - COALESCE(paid.total_paid, 0)) as balance
       FROM fee_vouchers fv
       LEFT JOIN classes c ON fv.class_id = c.id
       LEFT JOIN (
@@ -95,8 +95,9 @@ router.get('/fees/:studentId', authenticate, async (req, res) => {
 // GET /parent/results/:studentId - bache ke exam results
 router.get('/results/:studentId', authenticate, async (req, res) => {
   try {
+    const pool = getPool();
     const { studentId } = req.params;
-    const result = await req.db.query(`
+    const result = await pool.query(`
       SELECT r.*, e.name as exam_name, e.type as exam_type, e.total_marks as exam_total,
              s.name as subject_name
       FROM results r
@@ -106,7 +107,6 @@ router.get('/results/:studentId', authenticate, async (req, res) => {
       ORDER BY e.start_date DESC, s.name
     `, [studentId]);
 
-    // Group by exam
     const exams = {};
     for (const row of result.rows) {
       if (!exams[row.exam_id]) {
@@ -139,7 +139,8 @@ router.get('/results/:studentId', authenticate, async (req, res) => {
 // GET /parent/profile - parent ka profile
 router.get('/profile', authenticate, async (req, res) => {
   try {
-    const result = await req.db.query(`
+    const pool = getPool();
+    const result = await pool.query(`
       SELECT p.*, u.email, u.name as user_name
       FROM parents p
       JOIN users u ON p.user_id = u.id

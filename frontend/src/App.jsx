@@ -2393,6 +2393,7 @@ function ExamsPage() {
   const [classes, setClasses] = useState([])
   const [subjects, setSubjects] = useState([])
   const [selectedSubjects, setSelectedSubjects] = useState([])
+  const [datesheetEntries, setDatesheetEntries] = useState([])
   const [form, setForm] = useState({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' })
   const [marksView, setMarksView] = useState(null)
   const [marksData, setMarksData] = useState([])
@@ -2424,9 +2425,20 @@ function ExamsPage() {
   const handleCreate = (e) => {
     e.preventDefault()
     const data = { ...form, class_id: parseInt(form.class_id), campus_id: form.campus_id ? parseInt(form.campus_id) : undefined, total_marks: parseInt(form.total_marks), passing_marks: parseInt(form.passing_marks), subject_ids: selectedSubjects.map(s => ({ id: s.id, max_marks: parseInt(form.total_marks), passing_marks: parseInt(form.passing_marks) })) }
-    api().post('/exams', data).then(() => {
+    api().post('/exams', data).then(res => {
+      const examId = res.data.data.id
+      const dsEntries = selectedSubjects.map((sub, idx) => ({
+        subject_id: sub.id,
+        exam_date: datesheetEntries[idx]?.date || form.start_date || '',
+        start_time: datesheetEntries[idx]?.start_time || '09:00',
+        end_time: datesheetEntries[idx]?.end_time || '12:00',
+        room_number: datesheetEntries[idx]?.room || ''
+      })).filter(e => e.exam_date)
+      if (dsEntries.length > 0) {
+        api().post(`/exams/${examId}/datesheet`, { entries: dsEntries }).catch(() => {})
+      }
       setMessage('Exam created!'); setShowForm(false); loadExams()
-      setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([])
+      setForm({ name: '', type: 'midterm', class_id: '', campus_id: '', total_marks: '100', passing_marks: '40', start_date: '', end_date: '' }); setSelectedSubjects([]); setDatesheetEntries([])
       setTimeout(() => setMessage(''), 3000)
     }).catch(err => alert(err.response?.data?.message || 'Error'))
   }
@@ -2749,6 +2761,44 @@ function ExamsPage() {
               </div>
               {selectedSubjects.length > 0 && <p className="text-xs text-gray-500 mt-1">{selectedSubjects.length} subject(s) selected</p>}
             </div>
+            {selectedSubjects.length > 0 && (
+              <div>
+                <label className="label">Datesheet (Optional)</label>
+                <p className="text-xs text-gray-400 mb-2">Set date & time for each subject</p>
+                <div className="space-y-2">
+                  {selectedSubjects.map((sub, idx) => (
+                    <div key={sub.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+                      <span className="text-sm font-medium w-32 truncate">{sub.name}</span>
+                      <input type="date" className="input-field text-sm py-1 w-36" value={datesheetEntries[idx]?.date || ''} onChange={e => {
+                        const updated = [...datesheetEntries]
+                        if (!updated[idx]) updated[idx] = { date: '', start_time: '09:00', end_time: '12:00', room: '' }
+                        updated[idx].date = e.target.value
+                        setDatesheetEntries(updated)
+                      }} />
+                      <input type="time" className="input-field text-sm py-1 w-24" value={datesheetEntries[idx]?.start_time || '09:00'} onChange={e => {
+                        const updated = [...datesheetEntries]
+                        if (!updated[idx]) updated[idx] = { date: '', start_time: '09:00', end_time: '12:00', room: '' }
+                        updated[idx].start_time = e.target.value
+                        setDatesheetEntries(updated)
+                      }} />
+                      <span className="text-gray-400">to</span>
+                      <input type="time" className="input-field text-sm py-1 w-24" value={datesheetEntries[idx]?.end_time || '12:00'} onChange={e => {
+                        const updated = [...datesheetEntries]
+                        if (!updated[idx]) updated[idx] = { date: '', start_time: '09:00', end_time: '12:00', room: '' }
+                        updated[idx].end_time = e.target.value
+                        setDatesheetEntries(updated)
+                      }} />
+                      <input className="input-field text-sm py-1 w-20" placeholder="Room" value={datesheetEntries[idx]?.room || ''} onChange={e => {
+                        const updated = [...datesheetEntries]
+                        if (!updated[idx]) updated[idx] = { date: '', start_time: '09:00', end_time: '12:00', room: '' }
+                        updated[idx].room = e.target.value
+                        setDatesheetEntries(updated)
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
               <button type="submit" className="btn-primary">Create Exam</button>
