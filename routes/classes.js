@@ -151,4 +151,20 @@ router.get('/teachers', authenticate, async (req, res) => {
   }
 });
 
+router.get('/:id/subjects', authenticate, async (req, res) => {
+  try {
+    const db = getDb();
+    const subjects = await db.prepare(`
+      SELECT s.id, s.name, s.code, cs.max_marks
+      FROM class_subjects cs
+      JOIN subjects s ON cs.subject_id = s.id
+      WHERE cs.class_id = ?
+      ORDER BY s.name
+    `).all(req.params.id);
+    res.json({ success: true, data: subjects });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

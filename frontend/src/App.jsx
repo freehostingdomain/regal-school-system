@@ -2427,6 +2427,7 @@ function ExamsPage() {
   const [datesheetView, setDatesheetView] = useState(null)
   const [datesheetData, setDatesheetData] = useState([])
   const [datesheetSubjects, setDatesheetSubjects] = useState([])
+  const [datesheetClassId, setDatesheetClassId] = useState('')
 
   const loadExams = () => {
     setLoading(true)
@@ -2523,16 +2524,18 @@ function ExamsPage() {
 
   const openDatesheet = (exam) => {
     setDatesheetView(exam)
+    setDatesheetClassId(exam.class_id || '')
     api().get(`/exams/${exam.id}/subjects`).then(res => {
       const subs = res.data.data || []
       setDatesheetSubjects(subs)
       api().get(`/exams/${exam.id}/datesheet`).then(dRes => {
         const existing = dRes.data.data || []
         const initial = subs.map(sub => {
-          const ex = existing.find(e => e.subject_id === sub.subject_id)
+          const ex = existing.find(e => e.subject_id === sub.subject_id && e.class_id === exam.class_id)
           return {
             subject_id: sub.subject_id,
             subject_name: sub.subject_name,
+            class_id: exam.class_id,
             exam_date: ex ? ex.exam_date?.split('T')[0] : (exam.start_date || ''),
             start_time: ex?.start_time || '09:00',
             end_time: ex?.end_time || '12:00',
@@ -2545,6 +2548,7 @@ function ExamsPage() {
         setDatesheetData(subs.map(sub => ({
           subject_id: sub.subject_id,
           subject_name: sub.subject_name,
+          class_id: exam.class_id,
           exam_date: exam.start_date || '',
           start_time: '09:00',
           end_time: '12:00',
@@ -2559,6 +2563,31 @@ function ExamsPage() {
     const updated = [...datesheetData]
     updated[idx] = { ...updated[idx], [field]: value }
     setDatesheetData(updated)
+  }
+
+  const changeDatesheetClass = (classId) => {
+    setDatesheetClassId(parseInt(classId))
+    if (!datesheetView) return
+    // Load subjects for the selected class via class_subjects
+    api().get(`/classes/${classId}/subjects`).then(res => {
+      const subs = res.data.data || []
+      setDatesheetSubjects(subs)
+      const existing = [...datesheetData]
+      const newEntries = subs.map(sub => {
+        const ex = existing.find(e => e.subject_id === sub.subject_id)
+        return {
+          subject_id: sub.subject_id,
+          subject_name: sub.name || sub.subject_name,
+          class_id: parseInt(classId),
+          exam_date: ex?.exam_date || datesheetView.start_date || '',
+          start_time: ex?.start_time || '09:00',
+          end_time: ex?.end_time || '12:00',
+          room_number: ex?.room_number || '',
+          notes: ex?.notes || ''
+        }
+      })
+      setDatesheetData(newEntries)
+    }).catch(() => {})
   }
 
   const saveDatesheet = () => {
@@ -2584,17 +2613,32 @@ function ExamsPage() {
           <div>
             <button onClick={() => { setDatesheetView(null); setDatesheetData([]) }} className="text-blue-600 hover:text-blue-800 text-sm mb-1">&larr; Back to Exams</button>
             <h1 className="text-2xl font-bold">Datesheet: {datesheetView.name}</h1>
-            <p className="text-sm text-gray-500">{datesheetView.class_name} | {datesheetView.start_date} to {datesheetView.end_date}</p>
+            <p className="text-sm text-gray-500">{datesheetView.start_date} to {datesheetView.end_date}</p>
           </div>
           <button onClick={saveDatesheet} className="btn-primary">Save Datesheet</button>
         </div>
         {message && <div className="px-4 py-3 rounded-lg text-sm bg-green-50 text-green-700">{message}</div>}
+        <div className="card p-4">
+          <div className="flex items-center gap-4">
+            <div>
+              <label className="label text-sm">Select Class *</label>
+              <select className="input-field" value={datesheetClassId} onChange={e => changeDatesheetClass(e.target.value)}>
+                <option value="">-- Select Class --</option>
+                {filteredClasses.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.campus_name})</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-sm text-gray-500 mt-5">{datesheetData.length} subjects loaded</p>
+          </div>
+        </div>
         <div className="card overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="table-header">
                   <th className="px-3 py-2">Subject</th>
+                  <th className="px-3 py-2">Class</th>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Start Time</th>
                   <th className="px-3 py-2">End Time</th>
@@ -2604,8 +2648,9 @@ function ExamsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {datesheetData.map((entry, idx) => (
-                  <tr key={entry.subject_id} className="hover:bg-gray-50">
+                  <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-3 py-2 font-medium">{entry.subject_name}</td>
+                    <td className="px-3 py-2 text-gray-500 text-xs">{filteredClasses.find(c => c.id === entry.class_id)?.name || '-'}</td>
                     <td className="px-3 py-2"><input type="date" className="input-field w-36 text-sm py-1" value={entry.exam_date} onChange={e => updateDatesheetEntry(idx, 'exam_date', e.target.value)} /></td>
                     <td className="px-3 py-2"><input type="time" className="input-field w-24 text-sm py-1" value={entry.start_time} onChange={e => updateDatesheetEntry(idx, 'start_time', e.target.value)} /></td>
                     <td className="px-3 py-2"><input type="time" className="input-field w-24 text-sm py-1" value={entry.end_time} onChange={e => updateDatesheetEntry(idx, 'end_time', e.target.value)} /></td>
