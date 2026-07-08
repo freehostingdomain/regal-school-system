@@ -201,27 +201,15 @@ router.put('/:id/toggle-results', authenticate, authorize('super_admin', 'campus
 router.get('/live/datesheets', authenticate, async (req, res) => {
   try {
     const pool = getPool();
-    let query = `
+    const query = `
       SELECT e.*, c.name as class_name, sc.name as campus_name
       FROM exams e
       LEFT JOIN classes c ON e.class_id = c.id
       LEFT JOIN campuses sc ON e.campus_id = sc.id
       WHERE e.is_active = 1 AND e.is_datesheet_live = 1
+      ORDER BY e.start_date ASC
     `;
-    const params = [];
-    if (req.user.role === 'parent') {
-      const parentResult = await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id]);
-      if (parentResult.rows.length) {
-        const childResult = await pool.query('SELECT class_id FROM students WHERE parent_id = $1 AND is_active = 1', [parentResult.rows[0].id]);
-        const classIds = childResult.rows.map(r => r.class_id);
-        if (classIds.length) {
-          query += ` AND e.class_id = ANY($1)`;
-          params.push(classIds);
-        }
-      }
-    }
-    query += ' ORDER BY e.start_date ASC';
-    const exams = (await pool.query(query, params)).rows;
+    const exams = (await pool.query(query)).rows;
     res.json({ success: true, data: exams });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -232,27 +220,15 @@ router.get('/live/datesheets', authenticate, async (req, res) => {
 router.get('/live/results', authenticate, async (req, res) => {
   try {
     const pool = getPool();
-    let query = `
+    const query = `
       SELECT e.*, c.name as class_name, sc.name as campus_name
       FROM exams e
       LEFT JOIN classes c ON e.class_id = c.id
       LEFT JOIN campuses sc ON e.campus_id = sc.id
       WHERE e.is_active = 1 AND e.is_results_live = 1
+      ORDER BY e.start_date DESC
     `;
-    const params = [];
-    if (req.user.role === 'parent') {
-      const parentResult = await pool.query('SELECT id FROM parents WHERE user_id = $1', [req.user.id]);
-      if (parentResult.rows.length) {
-        const childResult = await pool.query('SELECT class_id FROM students WHERE parent_id = $1 AND is_active = 1', [parentResult.rows[0].id]);
-        const classIds = childResult.rows.map(r => r.class_id);
-        if (classIds.length) {
-          query += ` AND e.class_id = ANY($1)`;
-          params.push(classIds);
-        }
-      }
-    }
-    query += ' ORDER BY e.start_date DESC';
-    const exams = (await pool.query(query, params)).rows;
+    const exams = (await pool.query(query)).rows;
     res.json({ success: true, data: exams });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
