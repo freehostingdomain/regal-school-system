@@ -152,6 +152,8 @@ function Sidebar({ collapsed, setCollapsed }) {
     { icon: Bell, label: 'Announcements', path: '/announcements', roles: ['super_admin', 'campus_admin', 'teacher'] },
     { icon: Activity, label: 'Notifications', path: '/notifications', roles: ['super_admin', 'campus_admin', 'teacher', 'accountant'] },
     { icon: FileText, label: 'Exams', path: '/exams', roles: ['super_admin', 'campus_admin', 'teacher'] },
+    { icon: CheckCircle2, label: 'Staff Attendance', path: '/staff-attendance', roles: ['super_admin', 'campus_admin'] },
+    { icon: FileText, label: 'Staff Leaves', path: '/staff-leaves', roles: ['super_admin', 'campus_admin', 'teacher'] },
     { icon: Users, label: 'My Children', path: '/parent', roles: ['parent'] },
   ]
 
@@ -2406,6 +2408,410 @@ function TeachersPage() {
   )
 }
 
+function StaffAttendancePage() {
+  const { user } = useAuth()
+  const { selectedCampus } = useCampus()
+  const [records, setRecords] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1)
+  const [viewYear, setViewYear] = useState(new Date().getFullYear())
+  const [viewUserId, setViewUserId] = useState(null)
+  const [viewSummary, setViewSummary] = useState(null)
+
+  const loadAttendance = () => {
+    setLoading(true)
+    const params = { date }
+    if (selectedCampus) params.campus_id = selectedCampus
+    api().get('/staff-attendance', { params }).then(res => {
+      setRecords(res.data.data.map(r => ({
+        ...r,
+        status: r.status || 'absent',
+      })))
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
+  useEffect(() => { loadAttendance() }, [selectedCampus, date])
+
+  const updateStatus = (index, status) => {
+    const updated = [...records]
+    updated[index].status = status
+    setRecords(updated)
+  }
+
+  const saveAttendance = () => {
+    setSaving(true)
+    setMessage('')
+    const payload = records.map(r => ({
+      user_id: r.id,
+      status: r.status,
+    }))
+    api().post('/staff-attendance', { records: payload, date }).then(() => {
+      setMessage('Staff attendance saved!')
+      setSaving(false)
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => {
+      setMessage('Error: ' + (err.response?.data?.message || 'Failed'))
+      setSaving(false)
+    })
+  }
+
+  const loadSummary = (userId) => {
+    setViewUserId(userId)
+    api().get(`/staff-attendance/summary?user_id=${userId}&month=${viewMonth}&year=${viewYear}`).then(res => {
+      setViewSummary(res.data)
+    }).catch(() => setViewSummary(null))
+  }
+
+  const presentCount = records.filter(r => r.status === 'present').length
+  const lateCount = records.filter(r => r.status === 'late').length
+  const absentCount = records.filter(r => r.status === 'absent').length
+  const leaveCount = records.filter(r => r.status === 'leave').length
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Staff Attendance</h1>
+        <div className="flex items-center gap-3">
+          <input type="date" className="input-field" value={date} onChange={e => setDate(e.target.value)} />
+          {user?.role === 'super_admin' && (
+            <button onClick={saveAttendance} disabled={saving} className="btn-primary">
+              {saving ? 'Saving...' : 'Save Attendance'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {message && <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('Error') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message}</div>}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+          <p className="text-2xl font-bold">{presentCount}</p>
+          <p className="text-xs text-gray-500">Present</p>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+          <p className="text-2xl font-bold text-yellow-600">{lateCount}</p>
+          <p className="text-xs text-gray-500">Late</p>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+          <p className="text-2xl font-bold text-red-600">{absentCount}</p>
+          <p className="text-xs text-gray-500">Absent</p>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+          <p className="text-2xl font-bold text-blue-600">{leaveCount}</p>
+          <p className="text-xs text-gray-500">On Leave</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left">Staff Member</th>
+                <th className="px-4 py-3 text-left">Role</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {records.length === 0 ? (
+                <tr><td colSpan={4} className="text-center py-10 text-gray-500">No staff found</td></tr>
+              ) : records.map((r, idx) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <p className="font-medium">{r.name}</p>
+                    <p className="text-xs text-gray-500">{r.email}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 capitalize">{r.role?.replace('_', ' ')}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      {['present', 'late', 'absent', 'leave'].map(s => (
+                        <button key={s} onClick={() => updateStatus(idx, s)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg capitalize transition-colors ${
+                            r.status === s
+                              ? s === 'present' ? 'bg-green-600 text-white'
+                              : s === 'late' ? 'bg-yellow-500 text-white'
+                              : s === 'absent' ? 'bg-red-600 text-white'
+                              : 'bg-blue-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}>{s}</button>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button onClick={() => loadSummary(r.id)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">View History</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {viewUserId && viewSummary && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold">Attendance History</h2>
+                <button onClick={() => { setViewUserId(null); setViewSummary(null) }} className="text-gray-500 hover:text-gray-700">✕</button>
+              </div>
+              <div className="flex items-center gap-2 mb-4">
+                <select value={viewMonth} onChange={e => { setViewMonth(parseInt(e.target.value)); loadSummary(viewUserId) }} className="border rounded-lg px-3 py-2 text-sm">
+                  {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
+                    <option key={i} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+                <select value={viewYear} onChange={e => { setViewYear(parseInt(e.target.value)); loadSummary(viewUserId) }} className="border rounded-lg px-3 py-2 text-sm">
+                  {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-5 gap-2 mb-4 text-center text-xs">
+                <div className="bg-green-50 rounded-lg p-2"><p className="font-bold text-lg text-green-600">{viewSummary.summary.present}</p><p>Present</p></div>
+                <div className="bg-yellow-50 rounded-lg p-2"><p className="font-bold text-lg text-yellow-600">{viewSummary.summary.late}</p><p>Late</p></div>
+                <div className="bg-red-50 rounded-lg p-2"><p className="font-bold text-lg text-red-600">{viewSummary.summary.absent}</p><p>Absent</p></div>
+                <div className="bg-blue-50 rounded-lg p-2"><p className="font-bold text-lg text-blue-600">{viewSummary.summary.leave}</p><p>Leave</p></div>
+                <div className="bg-gray-50 rounded-lg p-2"><p className="font-bold text-lg">{viewSummary.summary.percentage}%</p><p>Total</p></div>
+              </div>
+              <div className="space-y-1">
+                {viewSummary.data.length === 0 ? (
+                  <p className="text-center text-gray-500 py-4">No records</p>
+                ) : viewSummary.data.map(a => (
+                  <div key={a.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg text-sm">
+                    <span>{formatDate(a.date)}</span>
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${
+                      a.status === 'present' ? 'bg-green-100 text-green-700' :
+                      a.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                      a.status === 'absent' ? 'bg-red-100 text-red-700' :
+                      'bg-blue-100 text-blue-700'
+                    }`}>{a.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StaffLeavesPage() {
+  const { user } = useAuth()
+  const { selectedCampus } = useCampus()
+  const [leaves, setLeaves] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ leave_type: 'casual', start_date: '', end_date: '', reason: '' })
+  const [balances, setBalances] = useState({})
+  const [filterStatus, setFilterStatus] = useState('')
+
+  const loadLeaves = () => {
+    setLoading(true)
+    const params = {}
+    if (filterStatus) params.status = filterStatus
+    api().get('/staff-attendance/leaves', { params }).then(res => {
+      setLeaves(res.data.data || [])
+      setBalances(res.data.balances || {})
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+
+  useEffect(() => { loadLeaves() }, [filterStatus])
+
+  const handleApply = (e) => {
+    e.preventDefault()
+    if (!form.start_date || !form.end_date || !form.reason) {
+      alert('Please fill all fields')
+      return
+    }
+    api().post('/staff-attendance/leaves', form).then(res => {
+      setMessage('Leave application submitted!')
+      setShowForm(false)
+      setForm({ leave_type: 'casual', start_date: '', end_date: '', reason: '' })
+      loadLeaves()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const handleApprove = (id, status) => {
+    const remarks = prompt(`Admin remarks for ${status}:`)
+    if (remarks === null) return
+    api().put(`/staff-attendance/leaves/${id}/approve`, { status, admin_remarks: remarks }).then(() => {
+      setMessage(`Leave ${status}!`)
+      loadLeaves()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const handleCancel = (id) => {
+    if (!confirm('Cancel this leave application?')) return
+    api().delete(`/staff-attendance/leaves/${id}`).then(() => {
+      setMessage('Leave cancelled!')
+      loadLeaves()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
+  const myBalance = balances[user?.id] || {}
+  const isAdmin = ['super_admin', 'campus_admin'].includes(user?.role)
+  const isTeacher = user?.role === 'teacher'
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Staff Leaves</h1>
+        <div className="flex items-center gap-3">
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+            <Plus className="w-4 h-4 mr-1 inline" /> Apply Leave
+          </button>
+        </div>
+      </div>
+
+      {message && <div className={`px-4 py-3 rounded-lg text-sm ${message.includes('Error') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message}</div>}
+
+      {isTeacher && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <p className="text-2xl font-bold text-blue-600">{myBalance.casual_leaves || 0}</p>
+            <p className="text-xs text-gray-500">Casual Leaves</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <p className="text-2xl font-bold text-yellow-600">{myBalance.sick_leaves || 0}</p>
+            <p className="text-xs text-gray-500">Sick Leaves</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <p className="text-2xl font-bold text-green-600">{myBalance.earned_leaves || 0}</p>
+            <p className="text-xs text-gray-500">Earned Leaves</p>
+          </div>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="card">
+          <h3 className="font-bold mb-3">Apply for Leave</h3>
+          <form onSubmit={handleApply} className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Leave Type</label>
+                <select className="input-field" value={form.leave_type} onChange={e => setForm({...form, leave_type: e.target.value})}>
+                  <option value="casual">Casual</option>
+                  <option value="sick">Sick</option>
+                  <option value="earned">Earned</option>
+                  <option value="maternity">Maternity</option>
+                  <option value="paternity">Paternity</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div></div>
+              <div>
+                <label className="label">Start Date *</label>
+                <input type="date" className="input-field" value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} required />
+              </div>
+              <div>
+                <label className="label">End Date *</label>
+                <input type="date" className="input-field" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} required />
+              </div>
+            </div>
+            <div>
+              <label className="label">Reason *</label>
+              <textarea className="input-field" rows={3} value={form.reason} onChange={e => setForm({...form, reason: e.target.value})} required placeholder="Describe your reason for leave..." />
+            </div>
+            <div className="flex gap-2">
+              <button type="submit" className="btn-primary">Submit Application</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left">Staff</th>
+                <th className="px-4 py-3 text-left">Type</th>
+                <th className="px-4 py-3 text-left">Duration</th>
+                <th className="px-4 py-3 text-left">Reason</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {leaves.length === 0 ? (
+                <tr><td colSpan={6} className="text-center py-10 text-gray-500">No leave applications</td></tr>
+              ) : leaves.map(l => {
+                const days = Math.ceil((new Date(l.end_date) - new Date(l.start_date)) / (1000 * 60 * 60 * 24)) + 1
+                return (
+                  <tr key={l.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{l.user_name}</p>
+                      <p className="text-xs text-gray-500 capitalize">{l.user_role?.replace('_', ' ')}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 text-xs rounded-full capitalize ${
+                        l.leave_type === 'sick' ? 'bg-yellow-100 text-yellow-700' :
+                        l.leave_type === 'casual' ? 'bg-blue-100 text-blue-700' :
+                        l.leave_type === 'earned' ? 'bg-green-100 text-green-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>{l.leave_type}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <p>{formatDate(l.start_date)} to {formatDate(l.end_date)}</p>
+                      <p className="text-gray-500">{days} day(s)</p>
+                    </td>
+                    <td className="px-4 py-3 text-xs max-w-[200px] truncate">{l.reason}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${
+                        l.status === 'approved' ? 'bg-green-100 text-green-700' :
+                        l.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-yellow-100 text-yellow-700'
+                      }`}>{l.status}</span>
+                      {l.admin_remarks && <p className="text-xs text-gray-500 mt-1">{l.admin_remarks}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {l.status === 'pending' && isAdmin && (
+                          <>
+                            <button onClick={() => handleApprove(l.id, 'approved')} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg">Approve</button>
+                            <button onClick={() => handleApprove(l.id, 'rejected')} className="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg">Reject</button>
+                          </>
+                        )}
+                        {l.status === 'pending' && (l.user_id === user?.id || isAdmin) && (
+                          <button onClick={() => handleCancel(l.id)} className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Cancel</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ExamsPage() {
   const { user } = useAuth()
   const { selectedCampus } = useCampus()
@@ -3572,6 +3978,8 @@ function App() {
           <Route path="/announcements" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><AnnouncementsPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/exams" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ExamsPage /></ProtectedRoute>} />
+          <Route path="/staff-attendance" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin']}><StaffAttendancePage /></ProtectedRoute>} />
+          <Route path="/staff-leaves" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><StaffLeavesPage /></ProtectedRoute>} />
           <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><ParentPortalPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to={user?.role === 'parent' ? '/parent' : '/dashboard'} />} />
         </Routes>

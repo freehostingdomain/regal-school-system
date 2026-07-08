@@ -18,6 +18,7 @@ const teacherRoutes = require('../../routes/teachers');
 const commissionRoutes = require('../../routes/commissions');
 const examRoutes = require('../../routes/exams');
 const parentRoutes = require('../../routes/parent');
+const staffAttendanceRoutes = require('../../routes/staff-attendance');
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use('/api/teachers', teacherRoutes);
 app.use('/api/commissions', commissionRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/parent', parentRoutes);
+app.use('/api/staff-attendance', staffAttendanceRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
