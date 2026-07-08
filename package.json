@@ -2,7 +2,7 @@
   "name": "regal-school-system",
   "version": "2.0.0",
   "description": "Regal School Management System",
-  "main": "server.js",
+  "private": true,
   "scripts": {
     "start": "node server.js",
     "build": "cd frontend && npm install && npm run build",
@@ -18,8 +18,5 @@
     "pdfkit": "^0.19.1",
     "pg": "^8.13.0",
     "serverless-http": "^3.2.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
