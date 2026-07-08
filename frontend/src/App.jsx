@@ -326,6 +326,8 @@ function Header() {
 }
 
 function DashboardPage() {
+  const { user } = useAuth()
+  if (user?.role === 'parent') return <Navigate to="/parent" />
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const { selectedCampus } = useCampus()
@@ -2396,6 +2398,9 @@ function ExamsPage() {
   const [marksData, setMarksData] = useState([])
   const [reportView, setReportView] = useState(null)
   const [reportData, setReportData] = useState(null)
+  const [datesheetView, setDatesheetView] = useState(null)
+  const [datesheetData, setDatesheetData] = useState([])
+  const [datesheetSubjects, setDatesheetSubjects] = useState([])
 
   const loadExams = () => {
     setLoading(true)
@@ -2479,6 +2484,54 @@ function ExamsPage() {
     }).catch(err => alert('Error'))
   }
 
+  const openDatesheet = (exam) => {
+    setDatesheetView(exam)
+    api().get(`/exams/${exam.id}/subjects`).then(res => {
+      const subs = res.data.data || []
+      setDatesheetSubjects(subs)
+      api().get(`/exams/${exam.id}/datesheet`).then(dRes => {
+        const existing = dRes.data.data || []
+        const initial = subs.map(sub => {
+          const ex = existing.find(e => e.subject_id === sub.subject_id)
+          return {
+            subject_id: sub.subject_id,
+            subject_name: sub.subject_name,
+            exam_date: ex ? ex.exam_date?.split('T')[0] : (exam.start_date || ''),
+            start_time: ex?.start_time || '09:00',
+            end_time: ex?.end_time || '12:00',
+            room_number: ex?.room_number || '',
+            notes: ex?.notes || ''
+          }
+        })
+        setDatesheetData(initial)
+      }).catch(() => {
+        setDatesheetData(subs.map(sub => ({
+          subject_id: sub.subject_id,
+          subject_name: sub.subject_name,
+          exam_date: exam.start_date || '',
+          start_time: '09:00',
+          end_time: '12:00',
+          room_number: '',
+          notes: ''
+        })))
+      })
+    }).catch(err => alert('Error loading subjects'))
+  }
+
+  const updateDatesheetEntry = (idx, field, value) => {
+    const updated = [...datesheetData]
+    updated[idx] = { ...updated[idx], [field]: value }
+    setDatesheetData(updated)
+  }
+
+  const saveDatesheet = () => {
+    const entries = datesheetData.filter(d => d.exam_date)
+    api().post(`/exams/${datesheetView.id}/datesheet`, { entries }).then(() => {
+      setMessage('Datesheet saved!'); setDatesheetView(null); loadExams()
+      setTimeout(() => setMessage(''), 3000)
+    }).catch(err => alert(err.response?.data?.message || 'Error'))
+  }
+
   const toggleSubject = (sub) => {
     setSelectedSubjects(prev => prev.find(s => s.id === sub.id) ? prev.filter(s => s.id !== sub.id) : [...prev, sub])
   }
@@ -2486,6 +2539,50 @@ function ExamsPage() {
   const filteredClasses = selectedCampus ? classes.filter(c => c.campus_id === selectedCampus) : classes
 
   const statusColors = { upcoming: 'bg-blue-100 text-blue-700', ongoing: 'bg-amber-100 text-amber-700', completed: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700' }
+
+  if (datesheetView) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <button onClick={() => { setDatesheetView(null); setDatesheetData([]) }} className="text-blue-600 hover:text-blue-800 text-sm mb-1">&larr; Back to Exams</button>
+            <h1 className="text-2xl font-bold">Datesheet: {datesheetView.name}</h1>
+            <p className="text-sm text-gray-500">{datesheetView.class_name} | {datesheetView.start_date} to {datesheetView.end_date}</p>
+          </div>
+          <button onClick={saveDatesheet} className="btn-primary">Save Datesheet</button>
+        </div>
+        {message && <div className="px-4 py-3 rounded-lg text-sm bg-green-50 text-green-700">{message}</div>}
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="table-header">
+                  <th className="px-3 py-2">Subject</th>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Start Time</th>
+                  <th className="px-3 py-2">End Time</th>
+                  <th className="px-3 py-2">Room</th>
+                  <th className="px-3 py-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {datesheetData.map((entry, idx) => (
+                  <tr key={entry.subject_id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium">{entry.subject_name}</td>
+                    <td className="px-3 py-2"><input type="date" className="input-field w-36 text-sm py-1" value={entry.exam_date} onChange={e => updateDatesheetEntry(idx, 'exam_date', e.target.value)} /></td>
+                    <td className="px-3 py-2"><input type="time" className="input-field w-24 text-sm py-1" value={entry.start_time} onChange={e => updateDatesheetEntry(idx, 'start_time', e.target.value)} /></td>
+                    <td className="px-3 py-2"><input type="time" className="input-field w-24 text-sm py-1" value={entry.end_time} onChange={e => updateDatesheetEntry(idx, 'end_time', e.target.value)} /></td>
+                    <td className="px-3 py-2"><input className="input-field w-20 text-sm py-1" value={entry.room_number} onChange={e => updateDatesheetEntry(idx, 'room_number', e.target.value)} placeholder="Room" /></td>
+                    <td className="px-3 py-2"><input className="input-field w-32 text-sm py-1" value={entry.notes} onChange={e => updateDatesheetEntry(idx, 'notes', e.target.value)} placeholder="Notes" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (marksView) {
     const students = [...new Set(marksData.map(m => ({ id: m.student_id, name: m.student_name, code: m.student_code })))].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
@@ -2683,6 +2780,7 @@ function ExamsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => openMarksEntry(e)} className="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg">Marks</button>
+                      <button onClick={() => openDatesheet(e)} className="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-lg">Datesheet</button>
                       <button onClick={() => openReport(e)} className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg">Report</button>
                       {['super_admin', 'campus_admin', 'teacher'].includes(user?.role) && (
                         <>
@@ -3208,7 +3306,7 @@ function Layout({ children }) {
 function ProtectedRoute({ children, allowedRoles }) {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" />
-  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/dashboard" />
+  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to={user.role === 'parent' ? '/parent' : '/dashboard'} />
   return <Layout>{children}</Layout>
 }
 
@@ -3252,7 +3350,7 @@ function App() {
     <AuthContext.Provider value={{ user, login, logout }}>
       <CampusContext.Provider value={{ selectedCampus, setSelectedCampus }}>
         <Routes>
-          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
+          <Route path="/login" element={user ? <Navigate to={user.role === 'parent' ? '/parent' : '/dashboard'} /> : <LoginPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/students" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><StudentsPage /></ProtectedRoute>} />
         <Route path="/classes" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ClassesPage /></ProtectedRoute>} />
@@ -3263,7 +3361,7 @@ function App() {
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/exams" element={<ProtectedRoute allowedRoles={['super_admin','campus_admin','teacher']}><ExamsPage /></ProtectedRoute>} />
           <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><ParentPortalPage /></ProtectedRoute>} />
-          <Route path="*" element={<Navigate to="/dashboard" />} />
+          <Route path="*" element={<Navigate to={user?.role === 'parent' ? '/parent' : '/dashboard'} />} />
         </Routes>
       </CampusContext.Provider>
     </AuthContext.Provider>

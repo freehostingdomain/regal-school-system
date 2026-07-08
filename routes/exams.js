@@ -122,6 +122,53 @@ router.delete('/:id', authenticate, authorize('super_admin', 'campus_admin'), ac
   }
 });
 
+// Datesheet CRUD
+router.get('/:id/datesheet', authenticate, async (req, res) => {
+  try {
+    const pool = getPool();
+    const rows = (await pool.query(`
+      SELECT ed.*, s.name as subject_name, s.code as subject_code
+      FROM exam_datesheets ed
+      JOIN subjects s ON ed.subject_id = s.id
+      WHERE ed.exam_id = $1
+      ORDER BY ed.exam_date, ed.start_time
+    `, [req.params.id])).rows;
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:id/datesheet', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { entries } = req.body;
+    if (!entries || !entries.length) return res.status(400).json({ success: false, message: 'No entries provided.' });
+
+    for (const entry of entries) {
+      await pool.query(`
+        INSERT INTO exam_datesheets (exam_id, subject_id, exam_date, start_time, end_time, room_number, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (exam_id, subject_id)
+        DO UPDATE SET exam_date = $3, start_time = $4, end_time = $5, room_number = $6, notes = $7
+      `, [req.params.id, entry.subject_id, entry.exam_date, entry.start_time || '09:00', entry.end_time || '12:00', entry.room_number || '', entry.notes || '']);
+    }
+    res.json({ success: true, message: 'Datesheet saved.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.delete('/:id/datesheet', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), async (req, res) => {
+  try {
+    const pool = getPool();
+    await pool.query('DELETE FROM exam_datesheets WHERE exam_id = $1', [req.params.id]);
+    res.json({ success: true, message: 'Datesheet deleted.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.put('/:id/toggle-datesheet', authenticate, authorize('super_admin', 'campus_admin', 'teacher'), async (req, res) => {
   try {
     const pool = getPool();
